@@ -1,0 +1,5 @@
+experiments/sqlite/data/*.db
+experiments/sqlite/data/*.sqlite
+experiments/chroma/data/*
+.env
+experiments/.env

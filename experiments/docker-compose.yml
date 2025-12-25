@@ -1,0 +1,147 @@
+services:
+  go-hello:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: [ "go", "run", "./gohello" ]
+
+  sqlite-create:
+    extends:
+      service: go-hello
+    command: [ "go", "run", "./sqlite/cmd/create" ]
+
+  sqlite-populate:
+    extends:
+      service: go-hello
+    command: [ "go", "run", "./sqlite/cmd/populate" ]
+
+  sqlite-query:
+    extends:
+      service: go-hello
+    command: [ "go", "run", "./sqlite/cmd/query" ]
+
+  sqlite-drop:
+    extends:
+      service: go-hello
+    command: [ "go", "run", "./sqlite/cmd/drop" ]
+
+  redis-server:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  redis-cli:
+    extends:
+      service: go-hello
+    depends_on:
+      - redis-server
+    environment:
+      - REDIS_ADDR=redis-server:6379
+    command: [ "go", "run", "./redis/cmd/cli" ]
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka-broker:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+
+  kafka-cli:
+    extends:
+      service: go-hello
+    depends_on:
+      - zookeeper
+      - kafka-broker
+    environment:
+      - KAFKA_BROKERS=kafka-broker:9092
+      - KAFKA_TOPIC=demo-events
+      - KAFKA_CONSUMER_GROUP=demo-cli
+    command: [ "go", "run", "./kafka/cmd/cli" ]
+
+  chromadb:
+    image: chromadb/chroma:0.5.4
+    environment:
+      CHROMA_SERVER_HOST: "0.0.0.0"
+      CHROMA_SERVER_PORT: "8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./chroma/data/chroma:/chroma/.chroma
+
+  chroma-create:
+    extends:
+      service: go-hello
+    depends_on:
+      - chromadb
+    env_file:
+      - ./.env
+    environment:
+      - CHROMA_URL=http://chromadb:8000
+    command: [ "go", "run", "./chroma/cmd/create" ]
+
+  chroma-add:
+    extends:
+      service: go-hello
+    depends_on:
+      - chromadb
+    env_file:
+      - ./.env
+    environment:
+      - CHROMA_URL=http://chromadb:8000
+    command: [ "go", "run", "./chroma/cmd/add" ]
+
+  chroma-query:
+    extends:
+      service: go-hello
+    depends_on:
+      - chromadb
+    env_file:
+      - ./.env
+    environment:
+      - CHROMA_URL=http://chromadb:8000
+    command: [ "go", "run", "./chroma/cmd/query" ]
+
+  chroma-drop:
+    extends:
+      service: go-hello
+    depends_on:
+      - chromadb
+    env_file:
+      - ./.env
+    environment:
+      - CHROMA_URL=http://chromadb:8000
+    command: [ "go", "run", "./chroma/cmd/drop" ]
+
+  llm-cli:
+    extends:
+      service: go-hello
+    env_file:
+      - ./.env
+    command: [ "go", "run", "./llm/cmd/chat" ]
+
+  polymarket-search:
+    extends:
+      service: go-hello
+    command: [ "go", "run", "./polymarket/cmd/search" ]
+
+  kalshi-events:
+    extends:
+      service: go-hello
+    command: [ "go", "run", "./kalshi/cmd/events" ]
