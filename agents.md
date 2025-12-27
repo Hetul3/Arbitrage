@@ -1,5 +1,4 @@
 # Agent Workflow Guide
-
 This file ensures every LLM agent knows how we collaborate on the Arbitrage project. Read it before making changes.
 
 ## Environment & Tooling
