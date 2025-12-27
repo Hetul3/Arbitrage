@@ -49,6 +49,9 @@ run-llm:
 run-polymarket-search:
 	$(DOCKER_COMPOSE) run --rm --build polymarket-search
 
+run-polymarket-events:
+	$(DOCKER_COMPOSE) run --rm --build polymarket-events
+
 run-kalshi-events:
 	$(DOCKER_COMPOSE) run --rm --build kalshi-events
 

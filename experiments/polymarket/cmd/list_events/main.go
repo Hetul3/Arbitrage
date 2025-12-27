@@ -19,6 +19,18 @@ type PolymarketMarket struct {
 	LastTradePrice float64 `json:"lastTradePrice"`
 	VolumeNum      float64 `json:"volumeNum"`
 	Volume24h      float64 `json:"volume24hr"`
+	ClobTokenIds   string  `json:"clobTokenIds"` // JSON string array
+	MinTickSize    float64 `json:"orderPriceMinTickSize"`
+}
+
+type ClobLevel struct {
+	Price string `json:"price"`
+	Size  string `json:"size"`
+}
+
+type ClobBook struct {
+	Bids []ClobLevel `json:"bids"`
+	Asks []ClobLevel `json:"asks"`
 }
 
 type PolymarketEvent struct {
@@ -96,15 +108,45 @@ func main() {
 		fmt.Printf("Total Event Liquidity: %.2f\n", ev.Liquidity)
 		fmt.Printf("Total Event Open Interest: %.2f\n", ev.OpenInterest)
 
-		fmt.Println("\nMarkets & Details:")
+		fmt.Println("\nMarkets & Execution Details:")
 		for _, m := range ev.Markets {
-			fmt.Printf("\nMarket: %s\n", m.Question)
-			fmt.Printf("Live Odds (Last Trade Price): %.2f\n", m.LastTradePrice)
-			fmt.Printf("Volume (Total): %.2f\n", m.VolumeNum)
-			fmt.Printf("Volume (24h): %.2f\n", m.Volume24h)
+			fmt.Printf("\nMarket: %s (ID: %s)\n", m.Question, m.ID)
+			fmt.Printf("Live Odds (Gamma Last Price): %.2f\n", m.LastTradePrice)
+			fmt.Printf("Min Tick Size: %.4f\n", m.MinTickSize)
+
+			// Parse CLOB Token IDs
+			var tokenIds []string
+			if err := json.Unmarshal([]byte(m.ClobTokenIds), &tokenIds); err == nil && len(tokenIds) >= 2 {
+				fmt.Printf("CLOB Tokens: YES:%s, NO:%s\n", tokenIds[0], tokenIds[1])
+
+				// Fetch depth for YES token (as example of execution data)
+				clobURL := fmt.Sprintf("https://clob.polymarket.com/book?token_id=%s", tokenIds[0])
+				cresp, err := client.Get(clobURL)
+				if err == nil {
+					defer cresp.Body.Close()
+					var book ClobBook
+					if err := json.NewDecoder(cresp.Body).Decode(&book); err == nil {
+						fmt.Println("Real-time CLOB Order Book (YES Token):")
+						if len(book.Bids) > 0 {
+							fmt.Printf("  Top Bids: %v\n", book.Bids[:min(len(book.Bids), 3)])
+						}
+						if len(book.Asks) > 0 {
+							fmt.Printf("  Top Asks: %v\n", book.Asks[:min(len(book.Asks), 3)])
+						}
+					}
+				}
+			}
+
 			fmt.Printf("Rules/Resolution: %s\n", m.Description)
 		}
 	} else {
 		fmt.Println("\nNo active Polymarket events found.")
 	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -141,6 +141,11 @@ services:
       service: go-hello
     command: [ "go", "run", "./polymarket/cmd/search" ]
 
+  polymarket-events:
+    extends:
+      service: go-hello
+    command: [ "go", "run", "./polymarket/cmd/list_events" ]
+
   kalshi-events:
     extends:
       service: go-hello

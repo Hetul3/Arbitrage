@@ -17,11 +17,25 @@ type KalshiMarket struct {
 	Title          string `json:"title"`
 	YesAsk         int64  `json:"yes_ask"`
 	YesBid         int64  `json:"yes_bid"`
+	NoAsk          int64  `json:"no_ask"`
+	NoBid          int64  `json:"no_bid"`
 	Volume         int64  `json:"volume"`
 	Volume24h      int64  `json:"volume_24h"`
 	OpenInterest   int64  `json:"open_interest"`
 	RulesPrimary   string `json:"rules_primary"`
 	RulesSecondary string `json:"rules_secondary"`
+	CloseTime      string `json:"close_time"`
+	TickSize       int64  `json:"tick_size"`
+}
+
+type OrderbookLevel struct {
+	Price    int64 `json:"price"`
+	Quantity int64 `json:"quantity"`
+}
+
+type KalshiOrderbook struct {
+	Yes [][]int64 `json:"yes"` // [price, quantity]
+	No  [][]int64 `json:"no"`  // [price, quantity]
 }
 
 type KalshiEvent struct {
@@ -31,6 +45,7 @@ type KalshiEvent struct {
 	SubTitle          string         `json:"sub_title"`
 	Description       string         `json:"description"`
 	Status            string         `json:"status"`
+	Category          string         `json:"category"`
 	ResolutionSources []string       `json:"settlement_sources"`
 	Markets           []KalshiMarket `json:"markets"`
 }
@@ -53,6 +68,8 @@ type SettlementSource struct {
 type KalshiSeries struct {
 	Ticker            string             `json:"ticker"`
 	SettlementSources []SettlementSource `json:"settlement_sources"`
+	ContractTermsURL  string             `json:"contract_terms_url"`
+	ContractURL       string             `json:"contract_url"`
 }
 
 type KalshiSeriesResponse struct {
@@ -122,19 +139,23 @@ func main() {
 		fmt.Printf("\n--- Fetching Series Information: %s ---\n", ev.SeriesTicker)
 		seriesURL := fmt.Sprintf("%s/%s", baseSeriesURL, ev.SeriesTicker)
 		sresp, err := client.Get(seriesURL)
-		var settlementSources []SettlementSource
+		var series *KalshiSeries
 		if err == nil {
 			defer sresp.Body.Close()
 			var sres KalshiSeriesResponse
 			if err := json.NewDecoder(sresp.Body).Decode(&sres); err == nil {
-				settlementSources = sres.Series.SettlementSources
+				series = &sres.Series
 			}
 		}
 
-		if len(settlementSources) > 0 {
-			fmt.Println("Settlement Sources (from Series):")
-			for _, s := range settlementSources {
-				fmt.Printf("- %s (%s)\n", s.Name, s.URL)
+		if series != nil {
+			fmt.Println("Matching Data (Series Level):")
+			fmt.Printf("- Contract Terms: %s\n", series.ContractTermsURL)
+			if len(series.SettlementSources) > 0 {
+				fmt.Println("- Settlement Sources:")
+				for _, s := range series.SettlementSources {
+					fmt.Printf("  * %s (%s)\n", s.Name, s.URL)
+				}
 			}
 		}
 
@@ -153,13 +174,27 @@ func main() {
 		fmt.Printf("Total Event Volume: %d\n", totalVolume)
 		fmt.Printf("Total Event Open Interest: %d\n", totalOpenInterest)
 
-		fmt.Println("\nMarkets & Details:")
+		fmt.Println("\nMarkets & Execution Details:")
 		for _, m := range markets {
-			fmt.Printf("\nMarket: %s\n", m.Title)
-			fmt.Printf("Live Odds (Yes Ask): %d (Ticks)\n", m.YesAsk)
-			fmt.Printf("Volume (Total): %d\n", m.Volume)
-			fmt.Printf("Volume (24h): %d\n", m.Volume24h)
-			fmt.Printf("Open Interest: %d\n", m.OpenInterest)
+			fmt.Printf("\nMarket: %s (%s)\n", m.Title, m.Ticker)
+			fmt.Printf("Status: Active/Open (Exp: %s)\n", m.CloseTime)
+			fmt.Printf("Live Odds (Top Bid/Ask): Yes:%d/%d, No:%d/%d\n", m.YesBid, m.YesAsk, m.NoBid, m.NoAsk)
+			fmt.Printf("Tick Size: %d\n", m.TickSize)
+			fmt.Printf("Volume (Total): %d, Volume (24h): %d, OI: %d\n", m.Volume, m.Volume24h, m.OpenInterest)
+
+			// Fetch Orderbook Depth
+			bookURL := fmt.Sprintf("https://api.elections.kalshi.com/trade-api/v2/markets/%s/orderbook?depth=5", m.Ticker)
+			bresp, err := client.Get(bookURL)
+			if err == nil {
+				defer bresp.Body.Close()
+				var book KalshiOrderbook
+				if err := json.NewDecoder(bresp.Body).Decode(&book); err == nil {
+					fmt.Println("Order Book Depth (Bids):")
+					fmt.Printf("  YES Bids: %v\n", book.Yes)
+					fmt.Printf("  NO Bids:  %v\n", book.No)
+					fmt.Println("  (Note: Kalshi returns bids only. Asks are derived as 100-opposing_bid)")
+				}
+			}
 			fmt.Printf("Rules (Primary): %s\n", m.RulesPrimary)
 			if m.RulesSecondary != "" {
 				fmt.Printf("Rules (Secondary): %s\n", m.RulesSecondary)
