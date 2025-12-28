@@ -6,6 +6,7 @@ This file ensures every LLM agent knows how we collaborate on the Arbitrage proj
 1. **Docker + Colima only** – all services run inside containers so results are deterministic. Follow `experiments/README.md` for setup (Colima with DNS flags, Docker context switching).
 2. **No direct host installs** – if a dependency is missing, extend the Dockerfiles/Compose setup rather than installing locally.
 3. **Use existing experiments** – each technology (SQLite, Redis, Kafka, Chroma, Nebius, Polymarket, Kalshi) already has a validated example under `experiments/`. Reuse their patterns when wiring production services.
+4. **After schema changes** – run `make sqlite-migrate` (inside Docker) to rebuild `data/arb.db` so it matches the unified `markets` table. This wipes the DB; rerun the collectors afterward.
 
 ## Development Process
 
@@ -35,5 +36,9 @@ This file ensures every LLM agent knows how we collaborate on the Arbitrage proj
 - Each major directory (collectors, workers, CLI, etc.) must contain an up-to-date `README.md` explaining its purpose, commands, and current status.
 - When adding a new subdirectory, create its README immediately.
 - Whenever code or behavior changes, update the relevant README so future agents can reconstruct context without digging through history.
+
+## Toolchain Requirements
+
+- Local Go commands must run with Go **1.24+** because the SQLite dependency (`modernc.org/sqlite v1.41.0`) requires it. If your host Go is ≥1.21, run `go env -w GOTOOLCHAIN=go1.24.11` or install Go 1.24 directly. Otherwise rely on the Docker/Compose commands (which already use Go 1.24 inside the container).
 
 Following this process keeps the project coherent across multiple AI sessions while giving the human overseer a clear verification path after each step.

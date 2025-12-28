@@ -14,12 +14,35 @@ The latest end-to-end architecture, schemas, and pipeline details live in [ARCHI
 ## Quick Start
 
 1. Review [ARCHITECTURE.md](ARCHITECTURE.md) for the canonical plan.
-2. Run Colima + Docker with working DNS (`colima start --dns 1.1.1.1 --dns 8.8.8.8`).
-3. From repo root, explore the experiments to verify dependencies:
+2. Ensure your local Go toolchain is **1.24+** (run `go env -w GOTOOLCHAIN=go1.24.11` if you only have Go ≥1.21 installed) or rely on the Docker targets below.
+3. Run Colima + Docker with working DNS (`colima start --dns 1.1.1.1 --dns 8.8.8.8`).
+4. From repo root, explore the experiments to verify dependencies:
    - `make -C experiments run-polymarket-events`
    - `make -C experiments run-kalshi-events`
    - `make -C experiments run-chroma-create` (requires `experiments/.env` with `NEBIUS_API_KEY`)
-4. When building new services, follow the architecture’s guidance for Kafka topics, Redis caches, Chroma schema, and SQLite warehouse tables. Implement work in small, testable increments so each hand-off can be verified before moving on (see `agents.md`).
+5. Initialize/migrate SQLite (runs inside Docker, default path `data/arb.db` mounted from the repo). **All migration commands drop data, so re-run collectors afterwards.**
+   - `make sqlite-create` – creates the unified `markets` table (run once for new environments).
+   - `make sqlite-migrate` – drops legacy `polymarket_markets`/`kalshi_markets` tables and recreates the unified schema (destroys data; run after pulling this change).
+   - `make sqlite-clear` – optional reset of all rows.
+   - `make sqlite-drop` – removes the table entirely.
+6. Run the dockerized collectors (all containerized via `docker-compose.yml`):
+   - `make run-polymarket-collector` – production loop (quiet logs) that polls continuously and relies on built-in exponential backoff when rate-limited.
+   - `make run-polymarket-collector-dev` – same logic but dumps every normalized JSON payload in real time for debugging.
+   - `make run-kalshi-collector` / `make run-kalshi-collector-dev` – Kalshi equivalents.
+   - `make run-collectors` / `make run-collectors-dev` – run both production or both dev collectors together; `make collectors-down` stops/removes containers.
+7. When building new services, follow the architecture’s guidance for Kafka topics, Redis caches, Chroma schema, and SQLite warehouse tables. Implement work in small, testable increments so each hand-off can be verified before moving on (see `agents.md`).
+
+### SQLite schema summary
+
+The unified `markets` table (backed by `data/arb.db` by default) mirrors the normalized structs we publish downstream. Key columns:
+
+- `venue` (`polymarket` | `kalshi`), `market_id`, `event_id`
+- Event metadata: `event_title`, `event_description`, `event_category`, `event_status`, `resolution_source`, `resolution_details`, `settlement_sources_json`, `contract_terms_url`
+- Market metadata: `question`, `subtitle`, `reference_url`, `close_time`, `tick_size`, `yes_bid/ask`, `no_bid/ask`, `volume`, `volume_24h`, `open_interest`, `clob_token_yes/no`
+- Orderbook depth + metadata (used for slippage modeling): `yes_bids_json`, `yes_asks_json`, `no_bids_json`, `no_asks_json`, `book_captured_at`, `book_hash`
+- Hashes/timestamps/raw payload: `text_hash`, `resolution_hash`, `last_seen_at`, `raw_json`
+
+Use `sqlite3 data/arb.db 'SELECT * FROM markets LIMIT 5'` (or any GUI) to inspect exactly what will be sent to Kafka later.
 
 ## Status
 

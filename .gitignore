@@ -3,3 +3,6 @@ experiments/sqlite/data/*.sqlite
 experiments/chroma/data/*
 .env
 experiments/.env
+data/*.db
+data/*.db-wal
+data/*.db-shm

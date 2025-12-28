@@ -164,12 +164,13 @@ A cache hit on `pair_bundle` that matches the latest hashes allows us to skip th
 
 Used as a warehouse; runtime logic never depends on these tables.
 
-- `polymarket_markets` (market_id PK, event_id, title, description, resolution_source, resolution_description, category, end_time, tick_size, clob_token_yes/no, text_hash, resolution_hash, last_seen_at, raw_json).
-- `kalshi_markets` (market_ticker PK, series_ticker, title, subtitle, description, rules_primary, rules_secondary, settlement_sources_json, contract_terms_url, category, close_time, tick_size, text_hash, resolution_hash, last_seen_at, raw_json).
-- `market_snapshots` (id PK, platform, market_id, captured_at, yes_bid/ask, no_bid/ask, volume, open_interest, snapshot_hash, raw_json).
-- `pairs` (pair_id PK, polymarket_id, kalshi_id, category, created_at, last_checked_at, status).
-- `pair_decisions` (id PK, pair_id, verdict, confidence, reasons_json, poly_resolution_hash, kalshi_resolution_hash, prompt_version, decided_at).
-- `opportunities` (id PK, pair_id, direction, profit_usd, edge_bps, max_size_contracts, budget_usd, freshness_seconds, books_json, captured_at).
+- `markets` (PRIMARY KEY `(venue, market_id)`): stores the normalized snapshot for every venue. Columns mirror the collector structs:
+  - Venue + identifiers: `venue`, `market_id`, `event_id`.
+  - Event metadata: `event_title`, `event_description`, `event_category`, `event_status`, `resolution_source`, `resolution_details`, `settlement_sources_json`, `contract_terms_url`.
+  - Market metadata: `question`, `subtitle`, `reference_url`, `close_time`, `tick_size`, `yes_bid`, `yes_ask`, `no_bid`, `no_ask`, `volume`, `volume_24h`, `open_interest`, `clob_token_yes`, `clob_token_no`.
+  - Orderbook depth + metadata (per market snapshot): `yes_bids_json`, `yes_asks_json`, `no_bids_json`, `no_asks_json`, `book_captured_at`, `book_hash`.
+  - Hashes, bookkeeping, and debugging: `text_hash`, `resolution_hash`, `last_seen_at`, `raw_json`.
+- (coming later) `pairs`, `pair_decisions`, and `opportunities` tables for downstream stages once implemented.
 
 ## LLM + Matching Details
 

@@ -51,4 +51,9 @@ make run-kalshi-events
 This runs the Go program in `cmd/events/main.go` which demonstrates fetching 3 pages of events and pulling a full "Matching + Arb" data snapshot for the first active event found.
 
 ## Multi-option Handling
-Kalshi groups related outcomes under an `event_ticker`. For multi-option events (e.g., "Next President"), we iterate over all markets returned by `with_nested_markets=true`. Each candidate is treated as a separate market leg with its own ticker and orderbook.
+Kalshi groups related outcomes under an `event_ticker`. For multi-option events (e.g., "Next President"):
+
+1. **Nested Markets**: Use the `with_nested_markets=true` flag on the `/events/{event_ticker}` endpoint.
+2. **Individual Tickers**: Each candidate or outcome is a separate **Market** with its own unique `ticker` (e.g., `KXELONMARS-99`).
+3. **Orderbook Depth**: You **must** call `GET /markets/{ticker}/orderbook` for each specific market leg to get the valid bids and derive executable asks. 
+4. **Deterministic Mapping**: This process is reliable as the nested market array contains all active outcomes for the event group.

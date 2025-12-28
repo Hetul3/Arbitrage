@@ -1,0 +1,72 @@
+x-go-service: &go-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  working_dir: /app
+  volumes:
+    - .:/app
+
+services:
+  polymarket-collector:
+    <<: *go-service
+    command: ["go", "run", "./cmd/polymarket_collector"]
+    environment:
+      GO111MODULE: "on"
+      POLYMARKET_PAGES: ${POLYMARKET_PAGES:-1}
+      POLYMARKET_PAGE_SIZE: ${POLYMARKET_PAGE_SIZE:-10}
+      SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
+
+  polymarket-collector-dev:
+    <<: *go-service
+    command: ["go", "run", "./cmd/polymarket_collector_dev"]
+    environment:
+      GO111MODULE: "on"
+      POLYMARKET_PAGES: ${POLYMARKET_PAGES:-1}
+      POLYMARKET_PAGE_SIZE: ${POLYMARKET_PAGE_SIZE:-10}
+      SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
+
+  kalshi-collector:
+    <<: *go-service
+    command: ["go", "run", "./cmd/kalshi_collector"]
+    environment:
+      GO111MODULE: "on"
+      KALSHI_PAGES: ${KALSHI_PAGES:-1}
+      KALSHI_PAGE_SIZE: ${KALSHI_PAGE_SIZE:-10}
+      SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
+
+  kalshi-collector-dev:
+    <<: *go-service
+    command: ["go", "run", "./cmd/kalshi_collector_dev"]
+    environment:
+      GO111MODULE: "on"
+      KALSHI_PAGES: ${KALSHI_PAGES:-1}
+      KALSHI_PAGE_SIZE: ${KALSHI_PAGE_SIZE:-10}
+      SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
+
+  sqlite-create:
+    <<: *go-service
+    command: ["go", "run", "./cmd/sqlite_create_tables"]
+    environment:
+      GO111MODULE: "on"
+      SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
+
+  sqlite-drop:
+    <<: *go-service
+    command: ["go", "run", "./cmd/sqlite_drop_tables"]
+    environment:
+      GO111MODULE: "on"
+      SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
+
+  sqlite-clear:
+    <<: *go-service
+    command: ["go", "run", "./cmd/sqlite_clear_tables"]
+    environment:
+      GO111MODULE: "on"
+      SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
+
+  sqlite-migrate:
+    <<: *go-service
+    command: ["go", "run", "./cmd/sqlite_migrate"]
+    environment:
+      GO111MODULE: "on"
+      SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}

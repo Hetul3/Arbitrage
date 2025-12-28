@@ -47,8 +47,14 @@ This runs `cmd/list_events/main.go`, which:
 3. Fetches the detailed event payload.
 4. Parses `clobTokenIds` for nested markets and performs live CLOB book lookups to demonstrate the "Arb Data" grab.
 
-## Multi-option Handling
-Polymarket events often have multiple markets (e.g. "Who will win the Oscar?").
-1. The **Gamma Event** contains an array of `markets`.
-2. Each **Market** has its own `clobTokenIds` (usually two: one for YES, one for NO).
-3. We treat each candidate/outcome as an individual market leg, fetching its specific token books for execution analysis.
+## Multi-choice Market Handling
+Polymarket events often have multiple markets (e.g. "Who will win the Oscar?"). 
+
+1. **Grouped Events**: These are events where several related markets (each with its own `question` and `id`) are listed together. 
+   - **Endpoint**: Fetch `/events/{id}` to get the full list of associated markets.
+   - **Market Legs**: Each leg (e.g., "Will Movie F win?") is a binary YES/NO market.
+   - **Placeholders**: Some markets use placeholders (Movie A, B, C) which may be updated by Polymarket later.
+2. **Token Mapping**: Each market contains a `clobTokenIds` string. 
+   - Format: `["YES_TOKEN_ID", "NO_TOKEN_ID"]`.
+   - We must parse this JSON string to fetch real-time depth from the CLOB.
+3. **Execution**: We treat each candidate/outcome as an individual market leg, fetching its specific token books for execution analysis.
