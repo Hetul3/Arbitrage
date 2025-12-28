@@ -27,7 +27,7 @@ func main() {
 	}
 	defer store.Close()
 
-	writer := setupWriter(ctx, "POLYMARKET_KAFKA_TOPIC", kafka.DefaultPolyTopic)
+	writer := setupWriter(ctx, "POLYMARKET_KAFKA_TOPIC", kafkautil.DefaultPolyTopic)
 	defer func() {
 		if writer != nil {
 			writer.Close()

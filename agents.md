@@ -40,5 +40,6 @@ This file ensures every LLM agent knows how we collaborate on the Arbitrage proj
 ## Toolchain Requirements
 
 - Local Go commands must run with Go **1.24+** because the SQLite dependency (`modernc.org/sqlite v1.41.0`) requires it. If your host Go is ≥1.21, run `go env -w GOTOOLCHAIN=go1.24.11` or install Go 1.24 directly. Otherwise rely on the Docker/Compose commands (which already use Go 1.24 inside the container).
+- Set `NEBIUS_API_KEY` (plus optional `NEBIUS_BASE_URL`/`NEBIUS_EMBED_MODEL`) and Chroma settings (`CHROMA_URL`, `CHROMA_COLLECTION`) before running the Kafka + embeddings pipeline.
 
 Following this process keeps the project coherent across multiple AI sessions while giving the human overseer a clear verification path after each step.

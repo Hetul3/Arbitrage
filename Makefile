@@ -22,13 +22,13 @@ run-collectors-dev:
 	$(DOCKER_COMPOSE) up --build polymarket-collector-dev kalshi-collector-dev
 
 run-kafka:
-	$(DOCKER_COMPOSE) up --build zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker kalshi-worker
+	$(DOCKER_COMPOSE) up --build chromadb zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker kalshi-worker
 
 run-kafka-dev:
-	$(DOCKER_COMPOSE) up --build zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev
+	$(DOCKER_COMPOSE) up --build chromadb zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev
 
 run-kafka-dev-verbose:
-	POLYMARKET_WORKER_VERBOSE=1 KALSHI_WORKER_VERBOSE=1 $(DOCKER_COMPOSE) up --build zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev
+	POLYMARKET_WORKER_VERBOSE=1 KALSHI_WORKER_VERBOSE=1 $(DOCKER_COMPOSE) up --build chromadb zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev
 
 sqlite-create:
 	$(DOCKER_COMPOSE) run --rm --build sqlite-create
@@ -44,6 +44,9 @@ sqlite-migrate:
 
 collectors-down:
 	$(DOCKER_COMPOSE) down --remove-orphans
+
+chroma-inspect:
+	go run ./cmd/chroma_inspect/main.go
 
 experiments:
 	@printf "Run 'make -C %s <target>' or simply 'make <target>' to invoke experiment commands.\n" "$(EXPERIMENTS_DIR)"

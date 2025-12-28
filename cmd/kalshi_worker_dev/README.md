@@ -1,5 +1,5 @@
 # Kalshi Worker (Dev)
 
-Verbose variant of the Kalshi worker. Every message is unmarshaled and printed, making it easy to confirm the collector → Kafka → worker flow. Used by `make run-pipeline-dev`.
+Verbose variant of the Kalshi worker. Every message is embedded/upserted just like prod, and you can choose concise or verbose logging via the run target (`make run-kafka-dev` or `make run-kafka-dev-verbose`).
 
-Env vars are the same as the production worker (`KALSHI_WORKERS`, `KALSHI_WORKER_GROUP`, `KALSHI_KAFKA_TOPIC`).
+Env vars mirror the production worker (`KALSHI_WORKERS`, `KALSHI_WORKER_GROUP`, `NEBIUS_API_KEY`, `CHROMA_URL`, etc.). Set `KALSHI_WORKER_VERBOSE=1` to force verbose logging even when using the non-verbose dev target.

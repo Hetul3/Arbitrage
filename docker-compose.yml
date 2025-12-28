@@ -7,6 +7,17 @@ x-go-service: &go-service
     - .:/app
 
 services:
+  chromadb:
+    image: chromadb/chroma:0.5.4
+    environment:
+      CHROMA_SERVER_HOST: "0.0.0.0"
+      CHROMA_SERVER_PORT: "8000"
+      PERSIST_DIRECTORY: "/chroma/chroma"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/chroma:/chroma/chroma
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     environment:
@@ -28,7 +39,7 @@ services:
 
   polymarket-collector:
     <<: *go-service
-    command: ["go", "run", "./cmd/polymarket_collector"]
+    command: [ "go", "run", "./cmd/polymarket_collector" ]
     depends_on:
       - kafka-broker
     environment:
@@ -41,7 +52,7 @@ services:
 
   polymarket-collector-dev:
     <<: *go-service
-    command: ["go", "run", "./cmd/polymarket_collector_dev"]
+    command: [ "go", "run", "./cmd/polymarket_collector_dev" ]
     depends_on:
       - kafka-broker
     environment:
@@ -54,7 +65,7 @@ services:
 
   kalshi-collector:
     <<: *go-service
-    command: ["go", "run", "./cmd/kalshi_collector"]
+    command: [ "go", "run", "./cmd/kalshi_collector" ]
     depends_on:
       - kafka-broker
     environment:
@@ -67,7 +78,7 @@ services:
 
   kalshi-collector-dev:
     <<: *go-service
-    command: ["go", "run", "./cmd/kalshi_collector_dev"]
+    command: [ "go", "run", "./cmd/kalshi_collector_dev" ]
     depends_on:
       - kafka-broker
     environment:
@@ -82,74 +93,100 @@ services:
     <<: *go-service
     depends_on:
       - kafka-broker
-    command: ["go", "run", "./cmd/polymarket_worker"]
+      - chromadb
+    command: [ "go", "run", "./cmd/polymarket_worker" ]
     environment:
       GO111MODULE: "on"
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       POLYMARKET_KAFKA_TOPIC: ${POLYMARKET_KAFKA_TOPIC:-polymarket.snapshots}
       POLYMARKET_WORKER_GROUP: ${POLYMARKET_WORKER_GROUP:-polymarket-workers}
       POLYMARKET_WORKERS: ${POLYMARKET_WORKERS:-2}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY}
+      NEBIUS_BASE_URL: ${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1/}
+      NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}
+      CHROMA_URL: ${CHROMA_URL:-http://chromadb:8000}
+      CHROMA_COLLECTION: ${CHROMA_COLLECTION:-market_snapshots}
 
   polymarket-worker-dev:
     <<: *go-service
     depends_on:
       - kafka-broker
-    command: ["go", "run", "./cmd/polymarket_worker_dev"]
+      - chromadb
+    command: [ "go", "run", "./cmd/polymarket_worker_dev" ]
     environment:
       GO111MODULE: "on"
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       POLYMARKET_KAFKA_TOPIC: ${POLYMARKET_KAFKA_TOPIC:-polymarket.snapshots}
       POLYMARKET_WORKER_GROUP: ${POLYMARKET_WORKER_GROUP:-polymarket-workers-dev}
       POLYMARKET_WORKERS: ${POLYMARKET_WORKERS:-1}
+      POLYMARKET_WORKER_VERBOSE: ${POLYMARKET_WORKER_VERBOSE:-0}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY}
+      NEBIUS_BASE_URL: ${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1/}
+      NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}
+      CHROMA_URL: ${CHROMA_URL:-http://chromadb:8000}
+      CHROMA_COLLECTION: ${CHROMA_COLLECTION:-market_snapshots}
 
   kalshi-worker:
     <<: *go-service
     depends_on:
       - kafka-broker
-    command: ["go", "run", "./cmd/kalshi_worker"]
+      - chromadb
+    command: [ "go", "run", "./cmd/kalshi_worker" ]
     environment:
       GO111MODULE: "on"
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       KALSHI_KAFKA_TOPIC: ${KALSHI_KAFKA_TOPIC:-kalshi.snapshots}
       KALSHI_WORKER_GROUP: ${KALSHI_WORKER_GROUP:-kalshi-workers}
       KALSHI_WORKERS: ${KALSHI_WORKERS:-2}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY}
+      NEBIUS_BASE_URL: ${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1/}
+      NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}
+      CHROMA_URL: ${CHROMA_URL:-http://chromadb:8000}
+      CHROMA_COLLECTION: ${CHROMA_COLLECTION:-market_snapshots}
 
   kalshi-worker-dev:
     <<: *go-service
     depends_on:
       - kafka-broker
-    command: ["go", "run", "./cmd/kalshi_worker_dev"]
+      - chromadb
+    command: [ "go", "run", "./cmd/kalshi_worker_dev" ]
     environment:
       GO111MODULE: "on"
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       KALSHI_KAFKA_TOPIC: ${KALSHI_KAFKA_TOPIC:-kalshi.snapshots}
       KALSHI_WORKER_GROUP: ${KALSHI_WORKER_GROUP:-kalshi-workers-dev}
       KALSHI_WORKERS: ${KALSHI_WORKERS:-1}
+      KALSHI_WORKER_VERBOSE: ${KALSHI_WORKER_VERBOSE:-0}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY}
+      NEBIUS_BASE_URL: ${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1/}
+      NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}
+      CHROMA_URL: ${CHROMA_URL:-http://chromadb:8000}
+      CHROMA_COLLECTION: ${CHROMA_COLLECTION:-market_snapshots}
 
   sqlite-create:
     <<: *go-service
-    command: ["go", "run", "./cmd/sqlite_create_tables"]
+    command: [ "go", "run", "./cmd/sqlite_create_tables" ]
     environment:
       GO111MODULE: "on"
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
 
   sqlite-drop:
     <<: *go-service
-    command: ["go", "run", "./cmd/sqlite_drop_tables"]
+    command: [ "go", "run", "./cmd/sqlite_drop_tables" ]
     environment:
       GO111MODULE: "on"
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
 
   sqlite-clear:
     <<: *go-service
-    command: ["go", "run", "./cmd/sqlite_clear_tables"]
+    command: [ "go", "run", "./cmd/sqlite_clear_tables" ]
     environment:
       GO111MODULE: "on"
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
 
   sqlite-migrate:
     <<: *go-service
-    command: ["go", "run", "./cmd/sqlite_migrate"]
+    command: [ "go", "run", "./cmd/sqlite_migrate" ]
     environment:
       GO111MODULE: "on"
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}

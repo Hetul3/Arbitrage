@@ -2,9 +2,7 @@ package sqlite
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +12,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/hetulpatel/Arbitrage/internal/collectors"
+	"github.com/hetulpatel/Arbitrage/internal/hashutil"
 )
 
 const (
@@ -241,8 +240,8 @@ func (s *Store) execUpsert(ctx context.Context, stmt *sql.Stmt, venue collectors
 	}
 	rawJSON, _ := json.Marshal(raw)
 	settlementJSON, _ := json.Marshal(ev.SettlementSources)
-	textHash := hashStrings(ev.Title, ev.Description, m.Question, m.Subtitle)
-	resHash := hashStrings(ev.ResolutionSource, ev.ResolutionDetails, ev.ContractTermsURL)
+	textHash := hashutil.HashStrings(ev.Title, ev.Description, m.Question, m.Subtitle)
+	resHash := hashutil.HashStrings(ev.ResolutionSource, ev.ResolutionDetails, ev.ContractTermsURL)
 
 	var clobYes, clobNo string
 	if len(m.ClobTokenIDs) > 0 {
@@ -256,7 +255,7 @@ func (s *Store) execUpsert(ctx context.Context, stmt *sql.Stmt, venue collectors
 	yesBidsJSON, yesAsksJSON := serializeOrderbookJSON(yesBook)
 	noBidsJSON, noAsksJSON := serializeOrderbookJSON(noBook)
 	bookCapturedAt := ts
-	bookHash := hashStrings(yesBidsJSON, yesAsksJSON, noBidsJSON, noAsksJSON)
+	bookHash := hashutil.HashStrings(yesBidsJSON, yesAsksJSON, noBidsJSON, noAsksJSON)
 
 	_, err := stmt.ExecContext(
 		ctx,
@@ -297,15 +296,6 @@ func (s *Store) execUpsert(ctx context.Context, stmt *sql.Stmt, venue collectors
 		string(rawJSON),
 	)
 	return err
-}
-
-func hashStrings(parts ...string) string {
-	h := sha256.New()
-	for _, p := range parts {
-		h.Write([]byte(p))
-		h.Write([]byte{'\n'})
-	}
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 func formatTime(t time.Time) string {

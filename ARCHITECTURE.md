@@ -32,10 +32,13 @@ Collectors -> Kafka (snapshots) -> Snapshot Worker
    - Paginate each venue's event lists/search endpoints, fetch per-market detail, normalize everything, store in SQLite (warehouse only), then publish to Kafka (`snapshots.polymarket`, `snapshots.kalshi`).
    - Normalized snapshot includes IDs, text fields, resolution info, close time, tick size, token/orderbook IDs, best bid/ask, and any batch orderbook summary collected inline.
 
-2. **Snapshot Worker** (single Go service consuming both snapshot topics):
-   - Ensures an embedding exists for the snapshot via Redis cache (`emb:<platform>:<market_id>:<text_hash>`). Misses call Nebius embeddings, store result in Redis (multi-day TTL), and immediately upsert to Chroma.
-   - Upserts into a single Chroma collection (`markets_all`). Metadata: platform, market_id, category, updated_at (unix seconds), close_time, text_hash. A maintenance process deletes entries older than 1 hour.
-   - After upsert, queries Chroma for opposite-venue markets: topK=3 within last-hour freshness, cosine similarity ≥ threshold (currently 0.95), and optional category match.
+2. **Kafka Workers (current implementation)**
+   - Venue-specific workers consume the snapshot topics, embed each market via Nebius, and upsert vectors + metadata (venue, IDs, close time, `text_hash`, `resolution_hash`, `captured_at`) into Chroma. No Redis cache yet—every snapshot is embedded on the fly.
+   - Chroma now holds the normalized `MarketSnapshot` JSON in the `document` field so downstream stages can query without re-fetching from SQLite.
+
+3. **Snapshot Worker (future stage)**
+   - Will ensure an embedding exists via Redis cache (`emb:<platform>:<market_id>:<text_hash>`). Misses call Nebius embeddings, store result in Redis (multi-day TTL), and immediately upsert to Chroma.
+   - Will query Chroma for opposite-venue markets: topK=3 within last-hour freshness, cosine similarity ≥ threshold (currently 0.95), and optional category match.
    - For each candidate result:
      - Construct a `pair_id` (e.g., `sha256("poly:<id>|kalshi:<id>")`).
      - Look in Redis `pair_bundle:<poly_id>:<kalshi_id>:<poly_hash>:<kalshi_hash>` to see if a SAFE verdict + opportunity metrics already exist. A cache hit means text/resolution data are unchanged.
@@ -58,9 +61,9 @@ Collectors -> Kafka (snapshots) -> Snapshot Worker
 | --- | --- |
 | `polymarket_collector` | Paginate Gamma events, fetch details & relevant CLOB snapshots, normalize, store in SQLite, publish to Kafka. |
 | `kalshi_collector` | Paginate events/markets, fetch per-market detail + orderbook snippets, normalize, store, publish. |
-| `polymarket_worker` / `_dev` | Consume `polymarket.snapshots` (prod silently, dev prints payloads) to drive downstream stages. |
-| `kalshi_worker` / `_dev` | Consume `kalshi.snapshots` (prod silently, dev prints payloads). |
-| `snapshot_worker` | Consumes snapshot topics, handles embeddings + Chroma upserts, finds matches, performs arb pre-check + LLM validation when needed, executes final arb, publishes opportunities. |
+| `polymarket_worker` / `_dev` | Consumes `polymarket.snapshots`, embeds each market via Nebius, and upserts vectors + metadata into Chroma (prod logs summaries, dev can dump payloads). |
+| `kalshi_worker` / `_dev` | Same as above for the Kalshi topic. |
+| `snapshot_worker` | Placeholder for the future matching/arb stage that will read from Chroma/Kafka once embeddings are in place. |
 | `chroma_maintainer` | Periodically deletes entries older than 1 hour to keep vector store fresh. |
 | `cli_consumer` | Displays live opportunities; later replaced/augmented by HTTP API. |
 

@@ -6,3 +6,4 @@ experiments/.env
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/chroma/

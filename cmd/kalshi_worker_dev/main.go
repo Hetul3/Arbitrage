@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/hetulpatel/Arbitrage/internal/chroma"
+	"github.com/hetulpatel/Arbitrage/internal/embed"
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 	"github.com/hetulpatel/Arbitrage/internal/workers"
@@ -37,8 +39,15 @@ func main() {
 	}
 	cancelEnsure()
 
+	embedClient := mustEmbedClient()
+	chromaClient, collectionID := mustChromaClient(ctx)
+	processor := workers.NewProcessor(embedClient, chromaClient, collectionID, "kalshi")
+
 	log.Printf("[kalshi-worker-dev] consuming %s with group %s (%d workers, verbose=%t)", topic, group, workerCount, verbose)
 	workers.Run(ctx, brokers, topic, group, workerCount, func(_ context.Context, snap *models.MarketSnapshot) error {
+		if err := processor.Handle(ctx, snap); err != nil {
+			return err
+		}
 		if verbose {
 			b, err := json.MarshalIndent(snap, "", "  ")
 			if err != nil {
@@ -46,11 +55,36 @@ func main() {
 			}
 			fmt.Printf("[kalshi-worker-dev] %s\n", string(b))
 		} else {
-			fmt.Printf("[kalshi-worker-dev] consumed market=%s event=%s captured=%s\n",
-				snap.Market.MarketID, snap.Event.EventID, snap.CapturedAt.Format(time.RFC3339))
+			fmt.Printf("[kalshi-worker-dev] upserted market=%s event=%s\n", snap.Market.MarketID, snap.Event.EventID)
 		}
 		return nil
 	})
+}
+
+func mustEmbedClient() *embed.Client {
+	cfg := embed.Config{
+		APIKey:  os.Getenv("NEBIUS_API_KEY"),
+		BaseURL: envString("NEBIUS_BASE_URL", ""),
+		Model:   envString("NEBIUS_EMBED_MODEL", ""),
+	}
+	client, err := embed.New(cfg)
+	if err != nil {
+		log.Fatalf("[kalshi-worker-dev] embed client: %v", err)
+	}
+	return client
+}
+
+func mustChromaClient(ctx context.Context) (*chroma.Client, string) {
+	chromaURL := envString("CHROMA_URL", "http://chromadb:8000")
+	collectionName := envString("CHROMA_COLLECTION", "market_snapshots")
+	client := chroma.NewClient(chromaURL)
+	ensureCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	collection, err := client.EnsureCollection(ensureCtx, collectionName)
+	if err != nil {
+		log.Fatalf("[kalshi-worker-dev] ensure chroma collection: %v", err)
+	}
+	return client, collection.ID
 }
 
 func envInt(key string, def int) int {
