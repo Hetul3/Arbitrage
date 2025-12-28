@@ -7,41 +7,124 @@ x-go-service: &go-service
     - .:/app
 
 services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka-broker:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
   polymarket-collector:
     <<: *go-service
     command: ["go", "run", "./cmd/polymarket_collector"]
+    depends_on:
+      - kafka-broker
     environment:
       GO111MODULE: "on"
       POLYMARKET_PAGES: ${POLYMARKET_PAGES:-1}
       POLYMARKET_PAGE_SIZE: ${POLYMARKET_PAGE_SIZE:-10}
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
+      POLYMARKET_KAFKA_TOPIC: ${POLYMARKET_KAFKA_TOPIC:-polymarket.snapshots}
 
   polymarket-collector-dev:
     <<: *go-service
     command: ["go", "run", "./cmd/polymarket_collector_dev"]
+    depends_on:
+      - kafka-broker
     environment:
       GO111MODULE: "on"
       POLYMARKET_PAGES: ${POLYMARKET_PAGES:-1}
       POLYMARKET_PAGE_SIZE: ${POLYMARKET_PAGE_SIZE:-10}
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
+      POLYMARKET_KAFKA_TOPIC: ${POLYMARKET_KAFKA_TOPIC:-polymarket.snapshots}
 
   kalshi-collector:
     <<: *go-service
     command: ["go", "run", "./cmd/kalshi_collector"]
+    depends_on:
+      - kafka-broker
     environment:
       GO111MODULE: "on"
       KALSHI_PAGES: ${KALSHI_PAGES:-1}
       KALSHI_PAGE_SIZE: ${KALSHI_PAGE_SIZE:-10}
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
+      KALSHI_KAFKA_TOPIC: ${KALSHI_KAFKA_TOPIC:-kalshi.snapshots}
 
   kalshi-collector-dev:
     <<: *go-service
     command: ["go", "run", "./cmd/kalshi_collector_dev"]
+    depends_on:
+      - kafka-broker
     environment:
       GO111MODULE: "on"
       KALSHI_PAGES: ${KALSHI_PAGES:-1}
       KALSHI_PAGE_SIZE: ${KALSHI_PAGE_SIZE:-10}
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
+      KALSHI_KAFKA_TOPIC: ${KALSHI_KAFKA_TOPIC:-kalshi.snapshots}
+
+  polymarket-worker:
+    <<: *go-service
+    depends_on:
+      - kafka-broker
+    command: ["go", "run", "./cmd/polymarket_worker"]
+    environment:
+      GO111MODULE: "on"
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
+      POLYMARKET_KAFKA_TOPIC: ${POLYMARKET_KAFKA_TOPIC:-polymarket.snapshots}
+      POLYMARKET_WORKER_GROUP: ${POLYMARKET_WORKER_GROUP:-polymarket-workers}
+      POLYMARKET_WORKERS: ${POLYMARKET_WORKERS:-2}
+
+  polymarket-worker-dev:
+    <<: *go-service
+    depends_on:
+      - kafka-broker
+    command: ["go", "run", "./cmd/polymarket_worker_dev"]
+    environment:
+      GO111MODULE: "on"
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
+      POLYMARKET_KAFKA_TOPIC: ${POLYMARKET_KAFKA_TOPIC:-polymarket.snapshots}
+      POLYMARKET_WORKER_GROUP: ${POLYMARKET_WORKER_GROUP:-polymarket-workers-dev}
+      POLYMARKET_WORKERS: ${POLYMARKET_WORKERS:-1}
+
+  kalshi-worker:
+    <<: *go-service
+    depends_on:
+      - kafka-broker
+    command: ["go", "run", "./cmd/kalshi_worker"]
+    environment:
+      GO111MODULE: "on"
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
+      KALSHI_KAFKA_TOPIC: ${KALSHI_KAFKA_TOPIC:-kalshi.snapshots}
+      KALSHI_WORKER_GROUP: ${KALSHI_WORKER_GROUP:-kalshi-workers}
+      KALSHI_WORKERS: ${KALSHI_WORKERS:-2}
+
+  kalshi-worker-dev:
+    <<: *go-service
+    depends_on:
+      - kafka-broker
+    command: ["go", "run", "./cmd/kalshi_worker_dev"]
+    environment:
+      GO111MODULE: "on"
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
+      KALSHI_KAFKA_TOPIC: ${KALSHI_KAFKA_TOPIC:-kalshi.snapshots}
+      KALSHI_WORKER_GROUP: ${KALSHI_WORKER_GROUP:-kalshi-workers-dev}
+      KALSHI_WORKERS: ${KALSHI_WORKERS:-1}
 
   sqlite-create:
     <<: *go-service

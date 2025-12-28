@@ -11,3 +11,4 @@ make run-kalshi-collector-dev
 Environment overrides:
 - `KALSHI_PAGES` (default 1)
 - `KALSHI_PAGE_SIZE` (default 10)
+- `KALSHI_KAFKA_TOPIC` (default `kalshi.snapshots`)

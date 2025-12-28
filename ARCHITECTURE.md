@@ -58,6 +58,8 @@ Collectors -> Kafka (snapshots) -> Snapshot Worker
 | --- | --- |
 | `polymarket_collector` | Paginate Gamma events, fetch details & relevant CLOB snapshots, normalize, store in SQLite, publish to Kafka. |
 | `kalshi_collector` | Paginate events/markets, fetch per-market detail + orderbook snippets, normalize, store, publish. |
+| `polymarket_worker` / `_dev` | Consume `polymarket.snapshots` (prod silently, dev prints payloads) to drive downstream stages. |
+| `kalshi_worker` / `_dev` | Consume `kalshi.snapshots` (prod silently, dev prints payloads). |
 | `snapshot_worker` | Consumes snapshot topics, handles embeddings + Chroma upserts, finds matches, performs arb pre-check + LLM validation when needed, executes final arb, publishes opportunities. |
 | `chroma_maintainer` | Periodically deletes entries older than 1 hour to keep vector store fresh. |
 | `cli_consumer` | Displays live opportunities; later replaced/augmented by HTTP API. |

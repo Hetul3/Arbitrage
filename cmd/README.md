@@ -7,6 +7,8 @@ Current commands:
 - `polymarket_collector_dev` – same logic but dumps normalized JSON for debugging.
 - `kalshi_collector` – production-style Kalshi ingestion loop.
 - `kalshi_collector_dev` – verbose JSON output for Kalshi.
+- `polymarket_worker` / `_dev` – Kafka consumers for Polymarket snapshots (prod vs dev logging).
+- `kalshi_worker` / `_dev` – Kafka consumers for Kalshi snapshots (prod vs dev logging).
 - `sqlite_create_tables` – creates required SQLite tables.
 - `sqlite_clear_tables` – deletes all rows while keeping the schema.
 - `sqlite_drop_tables` – drops the SQLite tables.

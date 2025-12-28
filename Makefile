@@ -1,7 +1,7 @@
 EXPERIMENTS_DIR := experiments
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: run-polymarket-collector run-polymarket-collector-dev run-kalshi-collector run-kalshi-collector-dev run-collectors run-collectors-dev sqlite-create sqlite-drop sqlite-clear sqlite-migrate collectors-down experiments %
+.PHONY: run-polymarket-collector run-polymarket-collector-dev run-kalshi-collector run-kalshi-collector-dev run-collectors run-collectors-dev run-kafka run-kafka-dev run-kafka-dev-verbose sqlite-create sqlite-drop sqlite-clear sqlite-migrate collectors-down experiments %
 
 run-polymarket-collector:
 	$(DOCKER_COMPOSE) run --rm --build polymarket-collector
@@ -20,6 +20,15 @@ run-collectors:
 
 run-collectors-dev:
 	$(DOCKER_COMPOSE) up --build polymarket-collector-dev kalshi-collector-dev
+
+run-kafka:
+	$(DOCKER_COMPOSE) up --build zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker kalshi-worker
+
+run-kafka-dev:
+	$(DOCKER_COMPOSE) up --build zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev
+
+run-kafka-dev-verbose:
+	POLYMARKET_WORKER_VERBOSE=1 KALSHI_WORKER_VERBOSE=1 $(DOCKER_COMPOSE) up --build zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev
 
 sqlite-create:
 	$(DOCKER_COMPOSE) run --rm --build sqlite-create

@@ -8,6 +8,7 @@ Developer-friendly entrypoint that continuously fetches Polymarket events, upser
 make run-polymarket-collector-dev
 ```
 
-Use env vars (same as production command) to tune pagination:
+Use env vars (same as production command) to tune pagination/topic:
 - `POLYMARKET_PAGES` (default 1)
 - `POLYMARKET_PAGE_SIZE` (default 10)
+- `POLYMARKET_KAFKA_TOPIC` (default `polymarket.snapshots`)

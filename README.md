@@ -15,7 +15,8 @@ The latest end-to-end architecture, schemas, and pipeline details live in [ARCHI
 
 1. Review [ARCHITECTURE.md](ARCHITECTURE.md) for the canonical plan.
 2. Ensure your local Go toolchain is **1.24+** (run `go env -w GOTOOLCHAIN=go1.24.11` if you only have Go ≥1.21 installed) or rely on the Docker targets below.
-3. Run Colima + Docker with working DNS (`colima start --dns 1.1.1.1 --dns 8.8.8.8`).
+3. Copy `example.env` → `.env` (or export the listed variables manually) so collectors/workers share the same configuration (`SQLITE_PATH`, `KAFKA_BROKERS`, worker counts, etc.).
+4. Run Colima + Docker with working DNS (`colima start --dns 1.1.1.1 --dns 8.8.8.8`).
 4. From repo root, explore the experiments to verify dependencies:
    - `make -C experiments run-polymarket-events`
    - `make -C experiments run-kalshi-events`
@@ -30,7 +31,12 @@ The latest end-to-end architecture, schemas, and pipeline details live in [ARCHI
    - `make run-polymarket-collector-dev` – same logic but dumps every normalized JSON payload in real time for debugging.
    - `make run-kalshi-collector` / `make run-kalshi-collector-dev` – Kalshi equivalents.
    - `make run-collectors` / `make run-collectors-dev` – run both production or both dev collectors together; `make collectors-down` stops/removes containers.
-7. When building new services, follow the architecture’s guidance for Kafka topics, Redis caches, Chroma schema, and SQLite warehouse tables. Implement work in small, testable increments so each hand-off can be verified before moving on (see `agents.md`).
+7. Run the Kafka-backed pipeline when needed:
+   - `make run-kafka` – brings up ZooKeeper/Kafka, both collectors, and the production worker pools (silent consumption).
+   - `make run-kafka-dev` – same stack but the dev workers log a concise line for every snapshot they pull (`consumed market=... event=...`).
+   - `make run-kafka-dev-verbose` – identical to `run-kafka-dev` but the workers dump the full JSON payloads as they consume them.
+   - Collectors in these pipeline commands always run in production mode (no stdout spam). Adjust topics/broker via env vars (`KAFKA_BROKERS`, `POLYMARKET_KAFKA_TOPIC`, `KALSHI_KAFKA_TOPIC`).
+8. When building new services, follow the architecture’s guidance for Kafka topics, Redis caches, Chroma schema, and SQLite warehouse tables. Implement work in small, testable increments so each hand-off can be verified before moving on (see `agents.md`).
 
 ### SQLite schema summary
 
