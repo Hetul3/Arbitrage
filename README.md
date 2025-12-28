@@ -41,6 +41,8 @@ The unified `markets` table (backed by `data/arb.db` by default) mirrors the nor
 - Market metadata: `question`, `subtitle`, `reference_url`, `close_time`, `tick_size`, `yes_bid/ask`, `no_bid/ask`, `volume`, `volume_24h`, `open_interest`, `clob_token_yes/no`
 - Orderbook depth + metadata (used for slippage modeling): `yes_bids_json`, `yes_asks_json`, `no_bids_json`, `no_asks_json`, `book_captured_at`, `book_hash`
 - Hashes/timestamps/raw payload: `text_hash`, `resolution_hash`, `last_seen_at`, `raw_json`
+- `yes_bids_json` / `yes_asks_json`: JSON arrays of `[price, quantity, rawPrice, rawAmount]` storing the entire ladder captured at `book_captured_at`. Slippage calculations will walk these levels (and the corresponding `no_*` ladders) to compute executable weighted-average fill prices.
+- `book_hash`: SHA-256 of the ladder JSON blobs; useful for deduping collector snapshots or cache keys when feeding downstream services.
 
 Use `sqlite3 data/arb.db 'SELECT * FROM markets LIMIT 5'` (or any GUI) to inspect exactly what will be sent to Kafka later.
 
