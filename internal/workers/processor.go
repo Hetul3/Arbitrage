@@ -41,7 +41,7 @@ func (p *Processor) Handle(ctx context.Context, snap *models.MarketSnapshot) err
 		return fmt.Errorf("marshal snapshot: %w", err)
 	}
 
-	id := fmt.Sprintf("%s:%s:%d", snap.Venue, snap.Market.MarketID, snap.CapturedAt.UnixNano())
+	id := fmt.Sprintf("%s:%s", snap.Venue, snap.Market.MarketID)
 
 	req := chroma.AddRequest{
 		IDs:        []string{id},

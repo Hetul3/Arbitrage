@@ -36,15 +36,19 @@ type AddRequest struct {
 }
 
 type QueryRequest struct {
-	QueryEmbeddings [][]float32 `json:"query_embeddings"`
-	NResults        int         `json:"n_results"`
+	QueryEmbeddings [][]float32    `json:"query_embeddings"`
+	NResults        int            `json:"n_results"`
+	Where           map[string]any `json:"where,omitempty"`
+	WhereDocument   map[string]any `json:"where_document,omitempty"`
+	Include         []string       `json:"include,omitempty"`
 }
 
 type QueryResponse struct {
-	IDs       [][]string         `json:"ids"`
-	Documents [][]string         `json:"documents"`
-	Distances [][]float32        `json:"distances"`
-	Metadatas [][]map[string]any `json:"metadatas"`
+	IDs        [][]string         `json:"ids"`
+	Documents  [][]string         `json:"documents"`
+	Distances  [][]float32        `json:"distances"`
+	Metadatas  [][]map[string]any `json:"metadatas"`
+	Embeddings [][][]float32      `json:"embeddings"`
 }
 
 type GetRequest struct {

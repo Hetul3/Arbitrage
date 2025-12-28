@@ -48,6 +48,12 @@ collectors-down:
 chroma-inspect:
 	go run ./cmd/chroma_inspect/main.go
 
+chroma-query:
+	go run ./cmd/chroma_query/main.go -id $(id) -k $(k)
+
+chroma-search:
+	go run ./cmd/chroma_search/main.go -text "$(text)" -k $(k)
+
 experiments:
 	@printf "Run 'make -C %s <target>' or simply 'make <target>' to invoke experiment commands.\n" "$(EXPERIMENTS_DIR)"
 

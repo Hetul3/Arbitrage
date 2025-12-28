@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/hetulpatel/Arbitrage/internal/chroma"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	godotenv.Load()
 	chromaURL := os.Getenv("CHROMA_URL")
 	if chromaURL == "" {
 		chromaURL = "http://localhost:8000"

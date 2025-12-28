@@ -52,6 +52,21 @@ The unified `markets` table (backed by `data/arb.db` by default) mirrors the nor
 
 Use `sqlite3 data/arb.db 'SELECT * FROM markets LIMIT 5'` (or any GUI) to inspect exactly what will be sent to Kafka later.
 
+### Chroma vector store summary
+
+Every Kafka snapshot is embedded via Nebius and upserted into a Chroma collection (defaults to `market_snapshots`). Each entry contains:
+
+- **Embedding text** – concatenation of `event_title`, `question`, settle date, and trimmed `event_description`/`subtitle` (≈ ≤7 sentences). No resolution sources or orderbook data are included in the embedding text.
+- **Document** – the full `MarketSnapshot` JSON (event + specific market + `captured_at`). This lets downstream services work directly from Chroma without re-querying SQLite.
+- **Metadata** – key fields for filtering/invalidations:
+  - `venue`, `market_id`, `event_id`
+  - `captured_at` (ISO timestamp)
+  - `close_time` if available
+  - `text_hash` (hash of the embedding text) and `resolution_hash` (hash of resolution source/details)
+  - any additional fields we need for freshness filters (e.g., `category` later on)
+
+Each upsert uses the ID `venue:market_id`, so successive snapshots overwrite the same vector while updating metadata (especially `captured_at`).
+
 ## Status
 
 - Architecture + experiments are finalized and in sync (SQLite instead of MySQL, Nebius instead of Gemini, taker-only execution for now).

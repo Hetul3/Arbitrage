@@ -33,8 +33,8 @@ Collectors -> Kafka (snapshots) -> Snapshot Worker
    - Normalized snapshot includes IDs, text fields, resolution info, close time, tick size, token/orderbook IDs, best bid/ask, and any batch orderbook summary collected inline.
 
 2. **Kafka Workers (current implementation)**
-   - Venue-specific workers consume the snapshot topics, embed each market via Nebius, and upsert vectors + metadata (venue, IDs, close time, `text_hash`, `resolution_hash`, `captured_at`) into Chroma. No Redis cache yet—every snapshot is embedded on the fly.
-   - Chroma now holds the normalized `MarketSnapshot` JSON in the `document` field so downstream stages can query without re-fetching from SQLite.
+   - Venue-specific workers consume the snapshot topics, build an embedding string (`event_title`, `question`, settle date, trimmed description + subtitle), call Nebius, and upsert vectors + metadata (venue, IDs, `captured_at`, `close_time`, `text_hash`, `resolution_hash`) into Chroma. No Redis cache yet—every snapshot is embedded on the fly.
+   - Each Chroma entry uses the deterministic ID `venue:market_id` (so new snapshots overwrite the same vector) and stores the full `MarketSnapshot` JSON in the `document` field for later re-use.
 
 3. **Snapshot Worker (future stage)**
    - Will ensure an embedding exists via Redis cache (`emb:<platform>:<market_id>:<text_hash>`). Misses call Nebius embeddings, store result in Redis (multi-day TTL), and immediately upsert to Chroma.

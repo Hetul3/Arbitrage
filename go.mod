@@ -5,8 +5,9 @@ go 1.24.0
 toolchain go1.24.11
 
 require (
-	github.com/segmentio/kafka-go v0.4.49
+	github.com/joho/godotenv v1.5.1
 	github.com/sashabaranov/go-openai v1.41.2
+	github.com/segmentio/kafka-go v0.4.49
 	modernc.org/sqlite v1.41.0
 )
 
