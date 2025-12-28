@@ -13,5 +13,8 @@ Current commands:
 - `sqlite_clear_tables` – deletes all rows while keeping the schema.
 - `sqlite_drop_tables` – drops the SQLite tables.
 - `sqlite_migrate` – drops legacy per-venue tables and recreates the unified `markets` table.
+- `chroma_inspect` – quick peek into vector store counts and recent documents.
+- `chroma_query` – cross-venue similarity search starting from a market ID.
+- `chroma_search` – natural language vector search across all venues.
 
 Each command has its own README with usage instructions and docker-compose targets.
