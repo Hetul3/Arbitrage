@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -37,10 +38,28 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+	if err := ensureWAL(db); err != nil {
 		return nil, fmt.Errorf("set WAL mode: %w", err)
 	}
 	return &Store{path: path, db: db}, nil
+}
+
+func ensureWAL(db *sql.DB) error {
+	const (
+		maxAttempts = 5
+		delay       = 200 * time.Millisecond
+	)
+	for i := 0; i < maxAttempts; i++ {
+		if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+			if strings.Contains(err.Error(), "database is locked") {
+				time.Sleep(delay)
+				continue
+			}
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("database is locked after retries")
 }
 
 // Path returns the path backing the store.

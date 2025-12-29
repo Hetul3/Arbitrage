@@ -11,6 +11,7 @@ import (
 	"github.com/hetulpatel/Arbitrage/internal/chroma"
 	"github.com/hetulpatel/Arbitrage/internal/embed"
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
+	"github.com/hetulpatel/Arbitrage/internal/matcher"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 	"github.com/hetulpatel/Arbitrage/internal/workers"
 )
@@ -39,12 +40,22 @@ func main() {
 	embedClient := mustEmbedClient()
 	chromaClient, collectionID := mustChromaClient(ctx)
 	processor := workers.NewProcessor(embedClient, chromaClient, collectionID, "kalshi")
+	finder := mustFinder(chromaClient, collectionID, envBool("MATCH_DEBUG", false))
+	matchLogger := matcher.NewLogger(matcher.LogModeQuiet)
 
 	log.Printf("[kalshi-worker] consuming %s with group %s (%d workers)", topic, group, workerCount)
 	workers.Run(ctx, brokers, topic, group, workerCount, func(ctx context.Context, snap *models.MarketSnapshot) error {
-		if err := processor.Handle(ctx, snap); err != nil {
+		embedding, err := processor.Handle(ctx, snap)
+		if err != nil {
 			return err
 		}
+		matchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		res, matchErr := finder.FindBestMatch(matchCtx, snap, embedding)
+		cancel()
+		if matchErr != nil {
+			return matchErr
+		}
+		matchLogger.LogMatch(snap, res, finder.Threshold())
 		log.Printf("[kalshi-worker] upserted market=%s event=%s", snap.Market.MarketID, snap.Event.EventID)
 		return nil
 	})
@@ -76,6 +87,22 @@ func mustChromaClient(ctx context.Context) (*chroma.Client, string) {
 	return client, collection.ID
 }
 
+func mustFinder(client *chroma.Client, collectionID string, debug bool) *matcher.Finder {
+	cfg := matcher.Config{
+		Client:       client,
+		CollectionID: collectionID,
+		TopK:         envInt("MATCH_TOP_K", 3),
+		Threshold:    envFloat("MATCH_SIMILARITY_THRESHOLD", 0.95),
+		Freshness:    time.Duration(envInt("MATCH_FRESH_WINDOW_SECONDS", 600)) * time.Second,
+		Debug:        debug,
+	}
+	finder, err := matcher.NewFinder(cfg)
+	if err != nil {
+		log.Fatalf("[kalshi-worker] matcher config: %v", err)
+	}
+	return finder
+}
+
 func envInt(key string, def int) int {
 	if val := os.Getenv(key); val != "" {
 		if parsed, err := strconv.Atoi(val); err == nil {
@@ -88,6 +115,24 @@ func envInt(key string, def int) int {
 func envString(key, def string) string {
 	if val := os.Getenv(key); val != "" {
 		return val
+	}
+	return def
+}
+
+func envFloat(key string, def float64) float64 {
+	if val := os.Getenv(key); val != "" {
+		if parsed, err := strconv.ParseFloat(val, 64); err == nil {
+			return parsed
+		}
+	}
+	return def
+}
+
+func envBool(key string, def bool) bool {
+	if val := os.Getenv(key); val != "" {
+		if parsed, err := strconv.ParseBool(val); err == nil {
+			return parsed
+		}
 	}
 	return def
 }

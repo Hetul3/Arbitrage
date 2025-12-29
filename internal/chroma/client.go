@@ -25,7 +25,8 @@ type Collection struct {
 }
 
 type createCollectionRequest struct {
-	Name string `json:"name"`
+	Name     string         `json:"name"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type AddRequest struct {
@@ -34,6 +35,7 @@ type AddRequest struct {
 	Metadatas  []map[string]any `json:"metadatas,omitempty"`
 	Embeddings [][]float32      `json:"embeddings,omitempty"`
 }
+type UpsertRequest AddRequest
 
 type QueryRequest struct {
 	QueryEmbeddings [][]float32    `json:"query_embeddings"`
@@ -79,11 +81,15 @@ func NewClient(baseURL string) *Client {
 }
 
 func (c *Client) EnsureCollection(ctx context.Context, name string) (*Collection, error) {
+	return c.EnsureCollectionWithMetadata(ctx, name, map[string]any{"hnsw:space": "cosine"})
+}
+
+func (c *Client) EnsureCollectionWithMetadata(ctx context.Context, name string, metadata map[string]any) (*Collection, error) {
 	col, err := c.GetCollection(ctx, name)
 	if err == nil {
 		return col, nil
 	}
-	col, err = c.CreateCollection(ctx, name)
+	col, err = c.CreateCollection(ctx, name, metadata)
 	if err != nil && !strings.Contains(err.Error(), "already exists") {
 		return nil, err
 	}
@@ -94,8 +100,8 @@ func (c *Client) EnsureCollection(ctx context.Context, name string) (*Collection
 	return c.GetCollection(ctx, name)
 }
 
-func (c *Client) CreateCollection(ctx context.Context, name string) (*Collection, error) {
-	req := createCollectionRequest{Name: name}
+func (c *Client) CreateCollection(ctx context.Context, name string, metadata map[string]any) (*Collection, error) {
+	req := createCollectionRequest{Name: name, Metadata: metadata}
 	var out Collection
 	if err := c.do(ctx, http.MethodPost, "/api/v1/collections", req, &out); err != nil {
 		return nil, err
@@ -117,6 +123,10 @@ func (c *Client) DeleteCollection(ctx context.Context, id string) error {
 
 func (c *Client) Add(ctx context.Context, collectionID string, req AddRequest) error {
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/api/v1/collections/%s/add", collectionID), req, nil)
+}
+
+func (c *Client) Upsert(ctx context.Context, collectionID string, req UpsertRequest) error {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/api/v1/collections/%s/upsert", collectionID), req, nil)
 }
 
 func (c *Client) Query(ctx context.Context, collectionID string, req QueryRequest) (*QueryResponse, error) {

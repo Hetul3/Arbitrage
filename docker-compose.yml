@@ -17,12 +17,16 @@ services:
       - "8000:8000"
     volumes:
       - ./data/chroma:/chroma/chroma
+    logging:
+      driver: "none"
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    logging:
+      driver: "none"
 
   kafka-broker:
     image: confluentinc/cp-kafka:7.5.0
@@ -36,6 +40,8 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    logging:
+      driver: "none"
 
   polymarket-collector:
     <<: *go-service
@@ -101,6 +107,10 @@ services:
       POLYMARKET_KAFKA_TOPIC: ${POLYMARKET_KAFKA_TOPIC:-polymarket.snapshots}
       POLYMARKET_WORKER_GROUP: ${POLYMARKET_WORKER_GROUP:-polymarket-workers}
       POLYMARKET_WORKERS: ${POLYMARKET_WORKERS:-2}
+      MATCH_DEBUG: ${MATCH_DEBUG:-0}
+      MATCH_TOP_K: ${MATCH_TOP_K:-3}
+      MATCH_SIMILARITY_THRESHOLD: ${MATCH_SIMILARITY_THRESHOLD:-0.95}
+      MATCH_FRESH_WINDOW_SECONDS: ${MATCH_FRESH_WINDOW_SECONDS:-600}
       NEBIUS_API_KEY: ${NEBIUS_API_KEY}
       NEBIUS_BASE_URL: ${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1/}
       NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}
@@ -120,6 +130,10 @@ services:
       POLYMARKET_WORKER_GROUP: ${POLYMARKET_WORKER_GROUP:-polymarket-workers-dev}
       POLYMARKET_WORKERS: ${POLYMARKET_WORKERS:-1}
       POLYMARKET_WORKER_VERBOSE: ${POLYMARKET_WORKER_VERBOSE:-0}
+      MATCH_DEBUG: ${MATCH_DEBUG:-0}
+      MATCH_TOP_K: ${MATCH_TOP_K:-3}
+      MATCH_SIMILARITY_THRESHOLD: ${MATCH_SIMILARITY_THRESHOLD:-0.95}
+      MATCH_FRESH_WINDOW_SECONDS: ${MATCH_FRESH_WINDOW_SECONDS:-600}
       NEBIUS_API_KEY: ${NEBIUS_API_KEY}
       NEBIUS_BASE_URL: ${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1/}
       NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}
@@ -138,6 +152,10 @@ services:
       KALSHI_KAFKA_TOPIC: ${KALSHI_KAFKA_TOPIC:-kalshi.snapshots}
       KALSHI_WORKER_GROUP: ${KALSHI_WORKER_GROUP:-kalshi-workers}
       KALSHI_WORKERS: ${KALSHI_WORKERS:-2}
+      MATCH_DEBUG: ${MATCH_DEBUG:-0}
+      MATCH_TOP_K: ${MATCH_TOP_K:-3}
+      MATCH_SIMILARITY_THRESHOLD: ${MATCH_SIMILARITY_THRESHOLD:-0.95}
+      MATCH_FRESH_WINDOW_SECONDS: ${MATCH_FRESH_WINDOW_SECONDS:-600}
       NEBIUS_API_KEY: ${NEBIUS_API_KEY}
       NEBIUS_BASE_URL: ${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1/}
       NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}
@@ -157,6 +175,10 @@ services:
       KALSHI_WORKER_GROUP: ${KALSHI_WORKER_GROUP:-kalshi-workers-dev}
       KALSHI_WORKERS: ${KALSHI_WORKERS:-1}
       KALSHI_WORKER_VERBOSE: ${KALSHI_WORKER_VERBOSE:-0}
+      MATCH_DEBUG: ${MATCH_DEBUG:-0}
+      MATCH_TOP_K: ${MATCH_TOP_K:-3}
+      MATCH_SIMILARITY_THRESHOLD: ${MATCH_SIMILARITY_THRESHOLD:-0.95}
+      MATCH_FRESH_WINDOW_SECONDS: ${MATCH_FRESH_WINDOW_SECONDS:-600}
       NEBIUS_API_KEY: ${NEBIUS_API_KEY}
       NEBIUS_BASE_URL: ${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1/}
       NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}

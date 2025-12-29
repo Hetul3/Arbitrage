@@ -13,6 +13,7 @@ import (
 	"github.com/hetulpatel/Arbitrage/internal/chroma"
 	"github.com/hetulpatel/Arbitrage/internal/embed"
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
+	"github.com/hetulpatel/Arbitrage/internal/matcher"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 	"github.com/hetulpatel/Arbitrage/internal/workers"
 )
@@ -42,20 +43,33 @@ func main() {
 	embedClient := mustEmbedClient()
 	chromaClient, collectionID := mustChromaClient(ctx)
 	processor := workers.NewProcessor(embedClient, chromaClient, collectionID, "polymarket")
+	finder := mustFinder(chromaClient, collectionID, envBool("MATCH_DEBUG", false))
+	matchLogger := matcher.NewLogger(func() matcher.LogMode {
+		if verbose {
+			return matcher.LogModeVerbose
+		}
+		return matcher.LogModeSummary
+	}())
 
-	log.Printf("[polymarket-worker-dev] consuming %s with group %s (%d workers, verbose=%t)", topic, group, workerCount, verbose)
-	workers.Run(ctx, brokers, topic, group, workerCount, func(_ context.Context, snap *models.MarketSnapshot) error {
-		if err := processor.Handle(ctx, snap); err != nil {
+	workers.Run(ctx, brokers, topic, group, workerCount, func(ctx context.Context, snap *models.MarketSnapshot) error {
+		embedding, err := processor.Handle(ctx, snap)
+		if err != nil {
 			return err
 		}
+		matchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		res, matchErr := finder.FindBestMatch(matchCtx, snap, embedding)
+		cancel()
+		if matchErr != nil {
+			return matchErr
+		}
+		matchLogger.LogMatch(snap, res, finder.Threshold())
+
 		if verbose {
 			b, err := json.MarshalIndent(snap, "", "  ")
 			if err != nil {
 				return err
 			}
 			fmt.Printf("[polymarket-worker-dev] %s\n", string(b))
-		} else {
-			fmt.Printf("[polymarket-worker-dev] upserted market=%s event=%s\n", snap.Market.MarketID, snap.Event.EventID)
 		}
 		return nil
 	})
@@ -87,6 +101,22 @@ func mustChromaClient(ctx context.Context) (*chroma.Client, string) {
 	return client, collection.ID
 }
 
+func mustFinder(client *chroma.Client, collectionID string, debug bool) *matcher.Finder {
+	cfg := matcher.Config{
+		Client:       client,
+		CollectionID: collectionID,
+		TopK:         envInt("MATCH_TOP_K", 3),
+		Threshold:    envFloat("MATCH_SIMILARITY_THRESHOLD", 0.95),
+		Freshness:    time.Duration(envInt("MATCH_FRESH_WINDOW_SECONDS", 600)) * time.Second,
+		Debug:        debug,
+	}
+	finder, err := matcher.NewFinder(cfg)
+	if err != nil {
+		log.Fatalf("[polymarket-worker-dev] matcher config: %v", err)
+	}
+	return finder
+}
+
 func envInt(key string, def int) int {
 	if val := os.Getenv(key); val != "" {
 		if parsed, err := strconv.Atoi(val); err == nil {
@@ -106,6 +136,15 @@ func envString(key, def string) string {
 func envBool(key string, def bool) bool {
 	if val := os.Getenv(key); val != "" {
 		if parsed, err := strconv.ParseBool(val); err == nil {
+			return parsed
+		}
+	}
+	return def
+}
+
+func envFloat(key string, def float64) float64 {
+	if val := os.Getenv(key); val != "" {
+		if parsed, err := strconv.ParseFloat(val, 64); err == nil {
 			return parsed
 		}
 	}

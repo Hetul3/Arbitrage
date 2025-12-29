@@ -23,47 +23,48 @@ func NewProcessor(embedClient *embed.Client, chromaClient *chroma.Client, collec
 	return &Processor{embedClient: embedClient, chromaClient: chromaClient, collectionID: collectionID, venue: venue}
 }
 
-func (p *Processor) Handle(ctx context.Context, snap *models.MarketSnapshot) error {
+func (p *Processor) Handle(ctx context.Context, snap *models.MarketSnapshot) ([]float32, error) {
 	text := buildEmbeddingText(snap)
 	if text == "" {
-		return fmt.Errorf("empty embedding text for market %s", snap.Market.MarketID)
+		return nil, fmt.Errorf("empty embedding text for market %s", snap.Market.MarketID)
 	}
 
 	embedding, err := p.embedClient.Embed(ctx, text)
 	if err != nil {
-		return fmt.Errorf("embed: %w", err)
+		return nil, fmt.Errorf("embed: %w", err)
 	}
 
 	metadata := buildMetadata(snap, text)
 
 	docBytes, err := json.Marshal(snap)
 	if err != nil {
-		return fmt.Errorf("marshal snapshot: %w", err)
+		return nil, fmt.Errorf("marshal snapshot: %w", err)
 	}
 
 	id := fmt.Sprintf("%s:%s", snap.Venue, snap.Market.MarketID)
 
-	req := chroma.AddRequest{
+	upsertReq := chroma.UpsertRequest{
 		IDs:        []string{id},
 		Documents:  []string{string(docBytes)},
 		Metadatas:  []map[string]any{metadata},
 		Embeddings: [][]float32{embedding},
 	}
 
-	if err := p.chromaClient.Add(ctx, p.collectionID, req); err != nil {
-		return fmt.Errorf("chroma add: %w", err)
+	if err := p.chromaClient.Upsert(ctx, p.collectionID, upsertReq); err != nil {
+		return nil, fmt.Errorf("chroma upsert: %w", err)
 	}
 
-	return nil
+	return embedding, nil
 }
 
 func buildMetadata(snap *models.MarketSnapshot, embeddingText string) map[string]any {
 	metadata := map[string]any{
-		"venue":       string(snap.Venue),
-		"market_id":   snap.Market.MarketID,
-		"event_id":    snap.Event.EventID,
-		"captured_at": snap.CapturedAt.Format(time.RFC3339Nano),
-		"text_hash":   hashutil.HashStrings(embeddingText),
+		"venue":            string(snap.Venue),
+		"market_id":        snap.Market.MarketID,
+		"event_id":         snap.Event.EventID,
+		"captured_at":      snap.CapturedAt.Format(time.RFC3339Nano),
+		"captured_at_unix": snap.CapturedAt.Unix(),
+		"text_hash":        hashutil.HashStrings(embeddingText),
 		"resolution_hash": hashutil.HashStrings(
 			snap.Event.ResolutionSource,
 			snap.Event.ResolutionDetails,

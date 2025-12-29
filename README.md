@@ -36,6 +36,7 @@ The latest end-to-end architecture, schemas, and pipeline details live in [ARCHI
    - `make run-kafka-dev` – same stack but workers log a concise `upserted market=… event=…` line per snapshot.
    - `make run-kafka-dev-verbose` – identical to the dev stack, except workers also dump the full JSON payloads as they consume them.
    - Collectors always run in production mode (no stdout spam). Adjust topics/broker/Chroma settings via env vars (`KAFKA_BROKERS`, `POLYMARKET_KAFKA_TOPIC`, `KALSHI_KAFKA_TOPIC`, `CHROMA_URL`, `CHROMA_COLLECTION`).
+9. Matching stage – the existing workers now query Chroma right after each upsert to find fresh opposite-venue candidates. Tune `MATCH_TOP_K`, `MATCH_SIMILARITY_THRESHOLD`, and `MATCH_FRESH_WINDOW_SECONDS` in your env to control search breadth, then pick the appropriate command: prod logs errors only, `*_worker_dev` prints concise match lines, and setting the existing `*_WORKER_VERBOSE=1` flag dumps full snapshots just like before. **After pulling this change, delete/recreate the Chroma collection so the new `captured_at_unix` metadata field is populated.**
 9. When building new services, follow the architecture’s guidance for Kafka topics, Redis caches, Chroma schema, and SQLite warehouse tables. Implement work in small, testable increments so each hand-off can be verified before moving on (see `agents.md`).
 
 ### SQLite schema summary
@@ -60,7 +61,7 @@ Every Kafka snapshot is embedded via Nebius and upserted into a Chroma collectio
 - **Document** – the full `MarketSnapshot` JSON (event + specific market + `captured_at`). This lets downstream services work directly from Chroma without re-querying SQLite.
 - **Metadata** – key fields for filtering/invalidations:
   - `venue`, `market_id`, `event_id`
-  - `captured_at` (ISO timestamp)
+  - `captured_at` (ISO timestamp) and `captured_at_unix` (Unix seconds for numeric filters)
   - `close_time` if available
   - `text_hash` (hash of the embedding text) and `resolution_hash` (hash of resolution source/details)
   - any additional fields we need for freshness filters (e.g., `category` later on)

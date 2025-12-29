@@ -22,13 +22,16 @@ run-collectors-dev:
 	$(DOCKER_COMPOSE) up --build polymarket-collector-dev kalshi-collector-dev
 
 run-kafka:
-	$(DOCKER_COMPOSE) up --build chromadb zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker kalshi-worker
+	$(DOCKER_COMPOSE) up --build -d chromadb zookeeper kafka-broker
+	$(DOCKER_COMPOSE) up --build --no-deps polymarket-collector kalshi-collector polymarket-worker kalshi-worker
 
 run-kafka-dev:
-	$(DOCKER_COMPOSE) up --build chromadb zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev
+	$(DOCKER_COMPOSE) up --build -d chromadb zookeeper kafka-broker
+	$(DOCKER_COMPOSE) up --build --no-deps polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev
 
 run-kafka-dev-verbose:
-	POLYMARKET_WORKER_VERBOSE=1 KALSHI_WORKER_VERBOSE=1 $(DOCKER_COMPOSE) up --build chromadb zookeeper kafka-broker polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev
+	$(DOCKER_COMPOSE) up --build -d chromadb zookeeper kafka-broker
+	POLYMARKET_WORKER_VERBOSE=1 KALSHI_WORKER_VERBOSE=1 $(DOCKER_COMPOSE) up --build --no-deps polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev
 
 sqlite-create:
 	$(DOCKER_COMPOSE) run --rm --build sqlite-create

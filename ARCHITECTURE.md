@@ -33,7 +33,7 @@ Collectors -> Kafka (snapshots) -> Snapshot Worker
    - Normalized snapshot includes IDs, text fields, resolution info, close time, tick size, token/orderbook IDs, best bid/ask, and any batch orderbook summary collected inline.
 
 2. **Kafka Workers (current implementation)**
-   - Venue-specific workers consume the snapshot topics, build an embedding string (`event_title`, `question`, settle date, trimmed description + subtitle), call Nebius, and upsert vectors + metadata (venue, IDs, `captured_at`, `close_time`, `text_hash`, `resolution_hash`) into Chroma. No Redis cache yet—every snapshot is embedded on the fly.
+   - Venue-specific workers consume the snapshot topics, build an embedding string (`event_title`, `question`, settle date, trimmed description + subtitle), call Nebius, and upsert vectors + metadata (venue, IDs, `captured_at`, `captured_at_unix`, `close_time`, `text_hash`, `resolution_hash`) into Chroma. No Redis cache yet—every snapshot is embedded on the fly.
    - Each Chroma entry uses the deterministic ID `venue:market_id` (so new snapshots overwrite the same vector) and stores the full `MarketSnapshot` JSON in the `document` field for later re-use.
 
 3. **Snapshot Worker (future stage)**
@@ -182,6 +182,10 @@ Used as a warehouse; runtime logic never depends on these tables.
 - Embeddings: Nebius OpenAI-compatible model, focusing on title + description (and optional resolution description if it adds clarity). Resolution sources are **not** included to avoid punishing otherwise equivalent markets.
 - Matching: topK=3; threshold 0.95 cosine similarity. Deterministic filters on timing, numeric thresholds, etc. Additional pairs can be tested if the top result was previously rejected.
 - LLM validation (Nebius) triggers only when there is no cached verdict for the current resolution hashes. Prompt includes both market descriptions, resolution text, and Kalshi settlement sources/contract_terms references. Outputs SAFE/UNSAFE.
+- **TODO:** once Redis + LLM verdict caching is wired in, the matcher must walk
+  the sorted candidates and consult the cache: skip hits previously marked
+  UNSAFE, fast-path SAFE verdicts straight into the arb stage, and only fall
+  back to the LLM when no cached verdict exists for the current hash pair.
 
 ## Fees & Slippage
 
