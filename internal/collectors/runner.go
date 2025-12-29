@@ -19,7 +19,7 @@ func RunLoop(ctx context.Context, collector Collector, opts FetchOptions, handle
 		events, err := collector.Fetch(ctx, opts)
 		if err != nil {
 			log.Printf("[%s] fetch failed: %v", collector.Name(), err)
-		} else if handleFn != nil {
+		} else if handleFn != nil && len(events) > 0 {
 			if err := handleFn(ctx, events); err != nil {
 				log.Printf("[%s] handler error: %v", collector.Name(), err)
 			}

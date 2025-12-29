@@ -15,7 +15,6 @@ const (
 
 // FetchOptions control how many pages/items a collector should fetch per run.
 type FetchOptions struct {
-	Pages    int
 	PageSize int
 }
 

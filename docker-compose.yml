@@ -50,8 +50,7 @@ services:
       - kafka-broker
     environment:
       GO111MODULE: "on"
-      POLYMARKET_PAGES: ${POLYMARKET_PAGES:-1}
-      POLYMARKET_PAGE_SIZE: ${POLYMARKET_PAGE_SIZE:-10}
+      POLYMARKET_PAGE_SIZE: ${POLYMARKET_PAGE_SIZE:-50}
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       POLYMARKET_KAFKA_TOPIC: ${POLYMARKET_KAFKA_TOPIC:-polymarket.snapshots}
@@ -63,8 +62,7 @@ services:
       - kafka-broker
     environment:
       GO111MODULE: "on"
-      POLYMARKET_PAGES: ${POLYMARKET_PAGES:-1}
-      POLYMARKET_PAGE_SIZE: ${POLYMARKET_PAGE_SIZE:-10}
+      POLYMARKET_PAGE_SIZE: ${POLYMARKET_PAGE_SIZE:-50}
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       POLYMARKET_KAFKA_TOPIC: ${POLYMARKET_KAFKA_TOPIC:-polymarket.snapshots}
@@ -76,8 +74,7 @@ services:
       - kafka-broker
     environment:
       GO111MODULE: "on"
-      KALSHI_PAGES: ${KALSHI_PAGES:-1}
-      KALSHI_PAGE_SIZE: ${KALSHI_PAGE_SIZE:-10}
+      KALSHI_PAGE_SIZE: ${KALSHI_PAGE_SIZE:-100}
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       KALSHI_KAFKA_TOPIC: ${KALSHI_KAFKA_TOPIC:-kalshi.snapshots}
@@ -89,8 +86,7 @@ services:
       - kafka-broker
     environment:
       GO111MODULE: "on"
-      KALSHI_PAGES: ${KALSHI_PAGES:-1}
-      KALSHI_PAGE_SIZE: ${KALSHI_PAGE_SIZE:-10}
+      KALSHI_PAGE_SIZE: ${KALSHI_PAGE_SIZE:-100}
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       KALSHI_KAFKA_TOPIC: ${KALSHI_KAFKA_TOPIC:-kalshi.snapshots}

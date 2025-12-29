@@ -36,8 +36,7 @@ func main() {
 
 	collector := kalshi.NewClient(kalshi.Config{})
 	opts := collectors.FetchOptions{
-		Pages:    envInt("KALSHI_PAGES", 1),
-		PageSize: envInt("KALSHI_PAGE_SIZE", 20),
+		PageSize: envInt("KALSHI_PAGE_SIZE", 100),
 	}
 
 	collectors.RunLoop(ctx, collector, opts, func(ctx context.Context, events []collectors.Event) error {

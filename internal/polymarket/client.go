@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -25,6 +26,7 @@ type Client struct {
 	baseURL    string
 	bookURL    string
 	httpClient *http.Client
+	nextOffset int
 }
 
 // Config controls optional overrides for the client.
@@ -61,41 +63,49 @@ func (c *Client) Name() string {
 	return "polymarket"
 }
 
-// Fetch retrieves paginated events and returns normalized snapshots.
+// Fetch retrieves a single page of open events and advances the internal offset.
+// When the end of results is reached, the offset is reset to start over.
 func (c *Client) Fetch(ctx context.Context, opts collectors.FetchOptions) ([]collectors.Event, error) {
-	pages := opts.Pages
-	if pages <= 0 {
-		pages = 1
-	}
 	pageSize := opts.PageSize
-	if pageSize <= 0 || pageSize > 100 {
-		pageSize = 20
+	if pageSize <= 0 {
+		pageSize = 50 // default fallback
 	}
 
+	list, err := c.listEvents(ctx, pageSize, c.nextOffset)
+	if err != nil {
+		return nil, fmt.Errorf("polymarket list events: %w", err)
+	}
+	if len(list) == 0 {
+		log.Printf("[polymarket] reached end of events, resetting offset")
+		c.nextOffset = 0
+		return nil, nil
+	}
+
+	log.Printf("[polymarket] processing batch of %d summaries (offset: %d)", len(list), c.nextOffset)
 	var events []collectors.Event
-	offset := 0
+	for _, summary := range list {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 
-	for page := 0; page < pages; page++ {
-		list, err := c.listEvents(ctx, pageSize, offset)
+		if summary.Closed {
+			continue
+		}
+		ev, err := c.fetchEvent(ctx, summary.ID)
 		if err != nil {
-			return nil, fmt.Errorf("polymarket list events: %w", err)
+			log.Printf("[polymarket] skip event %s: %v", summary.ID, err)
+			continue
 		}
-		if len(list) == 0 {
-			break
-		}
+		events = append(events, c.normalizeEvent(ctx, ev))
+	}
 
-		for _, summary := range list {
-			if summary.Closed {
-				continue
-			}
-			ev, err := c.fetchEvent(ctx, summary.ID)
-			if err != nil {
-				return nil, fmt.Errorf("fetch event %s: %w", summary.ID, err)
-			}
-			events = append(events, c.normalizeEvent(ctx, ev))
-		}
-
-		offset += pageSize
+	if len(list) < pageSize {
+		log.Printf("[polymarket] reached end of events, resetting offset")
+		c.nextOffset = 0
+	} else {
+		c.nextOffset += pageSize
 	}
 
 	return events, nil

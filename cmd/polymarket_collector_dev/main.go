@@ -38,8 +38,7 @@ func main() {
 
 	collector := polymarket.NewClient(polymarket.Config{})
 	opts := collectors.FetchOptions{
-		Pages:    envInt("POLYMARKET_PAGES", 1),
-		PageSize: envInt("POLYMARKET_PAGE_SIZE", 20),
+		PageSize: envInt("POLYMARKET_PAGE_SIZE", 50),
 	}
 
 	collectors.RunLoop(ctx, collector, opts, func(ctx context.Context, events []collectors.Event) error {

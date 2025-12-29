@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -26,6 +27,7 @@ type Client struct {
 	seriesURL  string
 	bookURL    string
 	httpClient *http.Client
+	nextCursor string
 }
 
 // Config provides optional overrides.
@@ -68,43 +70,49 @@ func (c *Client) Name() string {
 	return "kalshi"
 }
 
-// Fetch retrieves open events and normalizes them.
+// Fetch retrieves a single page of open events and advances the internal cursor.
+// When the end is reached, the cursor is reset to start over on the next call.
 func (c *Client) Fetch(ctx context.Context, opts collectors.FetchOptions) ([]collectors.Event, error) {
-	pages := opts.Pages
-	if pages <= 0 {
-		pages = 1
-	}
 	pageSize := opts.PageSize
-	if pageSize <= 0 || pageSize > 200 {
-		pageSize = 50
+	if pageSize <= 0 {
+		pageSize = 100 // default fallback
+	}
+	if pageSize > 200 {
+		pageSize = 200 // API limit
 	}
 
+	resp, err := c.listEvents(ctx, pageSize, c.nextCursor)
+	if err != nil {
+		return nil, fmt.Errorf("list kalshi events: %w", err)
+	}
+
+	log.Printf("[kalshi] processing batch of %d events (cursor: %s)", len(resp.Events), c.nextCursor)
 	var events []collectors.Event
-	cursor := ""
-	for page := 0; page < pages; page++ {
-		resp, err := c.listEvents(ctx, pageSize, cursor)
+	for _, evt := range resp.Events {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		detail, err := c.fetchEvent(ctx, evt.Ticker)
 		if err != nil {
-			return nil, err
+			log.Printf("[kalshi] skip event %s: %v", evt.Ticker, err)
+			continue
 		}
 
-		for _, evt := range resp.Events {
-			detail, err := c.fetchEvent(ctx, evt.Ticker)
-			if err != nil {
-				return nil, fmt.Errorf("fetch kalshi event %s: %w", evt.Ticker, err)
-			}
-
-			series, err := c.fetchSeries(ctx, evt.SeriesTicker)
-			if err != nil {
-				return nil, fmt.Errorf("fetch series %s: %w", evt.SeriesTicker, err)
-			}
-
-			events = append(events, c.normalizeEvent(ctx, detail, series))
+		series, err := c.fetchSeries(ctx, evt.SeriesTicker)
+		if err != nil {
+			log.Printf("[kalshi] skip series %s for event %s: %v", evt.SeriesTicker, evt.Ticker, err)
+			continue
 		}
 
-		if resp.Cursor == "" {
-			break
-		}
-		cursor = resp.Cursor
+		events = append(events, c.normalizeEvent(ctx, detail, series))
+	}
+
+	c.nextCursor = resp.Cursor
+	if c.nextCursor == "" {
+		log.Printf("[kalshi] reached end of events, resetting cursor")
 	}
 
 	return events, nil
