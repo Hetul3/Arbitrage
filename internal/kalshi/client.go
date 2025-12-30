@@ -176,8 +176,8 @@ func (c *Client) fetchOrderbooks(ctx context.Context, ticker string) (map[string
 		return nil, err
 	}
 
-	yesBids := convertLevels(out.Yes)
-	noBids := convertLevels(out.No)
+	yesBids := convertLevels(out.Orderbook.Yes)
+	noBids := convertLevels(out.Orderbook.No)
 
 	yesBook := collectors.Orderbook{
 		Bids: yesBids,
@@ -405,8 +405,10 @@ type market struct {
 }
 
 type orderbookResponse struct {
-	Yes [][]int64 `json:"yes"`
-	No  [][]int64 `json:"no"`
+	Orderbook struct {
+		Yes [][]int64 `json:"yes"`
+		No  [][]int64 `json:"no"`
+	} `json:"orderbook"`
 }
 
 type seriesResponse struct {
