@@ -181,6 +181,19 @@ services:
       CHROMA_URL: ${CHROMA_URL:-http://chromadb:8000}
       CHROMA_COLLECTION: ${CHROMA_COLLECTION:-market_snapshots}
 
+  arb-engine:
+    <<: *go-service
+    depends_on:
+      - kafka-broker
+    command: [ "go", "run", "./cmd/arb_engine" ]
+    environment:
+      GO111MODULE: "on"
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
+      MATCHES_KAFKA_TOPIC: ${MATCHES_KAFKA_TOPIC:-matches.live}
+      ARB_ENGINE_GROUP: ${ARB_ENGINE_GROUP:-arb-engine}
+      ARB_ENGINE_WORKERS: ${ARB_ENGINE_WORKERS:-1}
+      ARB_ENGINE_BUDGET_USD: ${ARB_ENGINE_BUDGET_USD:-100}
+
   sqlite-create:
     <<: *go-service
     command: [ "go", "run", "./cmd/sqlite_create_tables" ]

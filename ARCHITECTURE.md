@@ -134,6 +134,25 @@ Fields mirror Kalshi payloads (tick_size, settlement sources, etc.).
 
 `cached_bundle=true` indicates the Redis cache already contains a SAFE verdict + previous opportunity metrics and the hashes still match.
 
+### `Match` payload
+
+Matcher results are appended to `matches.log` for debugging and published to Kafka (`matches.live`). Each payload contains the full source/target snapshots so downstream stages do not need to hit Chroma again.
+
+```json
+{
+  "version": 1,
+  "pair_id": "...",
+  "similarity": 0.97,
+  "distance": 0.03,
+  "matched_at": 1730000300,
+  "source": { "... MarketSnapshot ..." },
+  "target": { "... MarketSnapshot ..." },
+  "arbitrage": null
+}
+```
+
+The arb engine consumes this topic, simulates both legs with slippage + fees, and writes the best `arbitrage` object back on the payload (and logs the concise summary).
+
 ### `Opportunity` payload
 
 ```json

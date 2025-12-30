@@ -16,5 +16,6 @@ Current commands:
 - `chroma_inspect` – quick peek into vector store counts and recent documents.
 - `chroma_query` – cross-venue similarity search starting from a market ID.
 - `chroma_search` – natural language vector search across all venues.
+- `arb_engine` – consumes match payloads, runs the depth-aware fee-inclusive arbitrage simulation, and logs the result.
 
 Each command has its own README with usage instructions and docker-compose targets.

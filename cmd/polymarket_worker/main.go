@@ -2,16 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
 	"strconv"
 	"time"
 
+	kafkago "github.com/segmentio/kafka-go"
+
 	"github.com/hetulpatel/Arbitrage/internal/chroma"
 	"github.com/hetulpatel/Arbitrage/internal/embed"
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
 	"github.com/hetulpatel/Arbitrage/internal/matcher"
+	"github.com/hetulpatel/Arbitrage/internal/matches"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 	"github.com/hetulpatel/Arbitrage/internal/workers"
 )
@@ -41,6 +45,13 @@ func main() {
 	chromaClient, collectionID := mustChromaClient(ctx)
 	processor := workers.NewProcessor(embedClient, chromaClient, collectionID, "polymarket")
 	finder := mustFinder(chromaClient, collectionID, envBool("MATCH_DEBUG", false))
+	matchWriter := setupMatchWriter(ctx, brokers)
+	defer func() {
+		if matchWriter != nil {
+			matchWriter.Close()
+		}
+	}()
+
 	matchLogger := matcher.NewLogger(matcher.LogModeQuiet)
 
 	log.Printf("[polymarket-worker] consuming %s with group %s (%d workers)", topic, group, workerCount)
@@ -55,7 +66,10 @@ func main() {
 		if matchErr != nil {
 			return matchErr
 		}
-		matchLogger.LogMatch(snap, res, finder.Threshold())
+		if res != nil {
+			matchLogger.LogMatch(snap, res, finder.Threshold())
+			publishMatch(ctx, matchWriter, snap, res)
+		}
 		log.Printf("[polymarket-worker] upserted market=%s event=%s", snap.Market.MarketID, snap.Event.EventID)
 		return nil
 	})
@@ -117,6 +131,41 @@ func envString(key, def string) string {
 		return val
 	}
 	return def
+}
+
+func setupMatchWriter(ctx context.Context, brokers []string) *kafkago.Writer {
+	topic := kafka.TopicFromEnv("MATCHES_KAFKA_TOPIC", kafka.DefaultMatchTopic)
+	if topic == "" {
+		return nil
+	}
+	ensureCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := kafka.EnsureTopic(ensureCtx, brokers, topic); err != nil {
+		log.Printf("[polymarket-worker] ensure matches topic warning: %v", err)
+	}
+	return kafka.NewWriter(brokers, topic)
+}
+
+func publishMatch(ctx context.Context, writer *kafkago.Writer, source *models.MarketSnapshot, res *matcher.Result) {
+	if writer == nil || res == nil || res.Target == nil {
+		return
+	}
+	sourceCopy := *source
+	targetCopy := *res.Target
+	payload := matches.NewPayload(sourceCopy, targetCopy, res.Similarity, res.Distance)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[polymarket-worker] marshal match error: %v", err)
+		return
+	}
+	msg := kafkago.Message{
+		Key:   []byte(payload.PairID),
+		Value: data,
+		Time:  payload.MatchedAt,
+	}
+	if err := writer.WriteMessages(ctx, msg); err != nil {
+		log.Printf("[polymarket-worker] publish match error: %v", err)
+	}
 }
 
 func envFloat(key string, def float64) float64 {

@@ -12,9 +12,10 @@ import (
 )
 
 const (
-    DefaultBroker      = "kafka-broker:9092"
-    DefaultPolyTopic   = "polymarket.snapshots"
-    DefaultKalshiTopic = "kalshi.snapshots"
+	DefaultBroker      = "kafka-broker:9092"
+	DefaultPolyTopic   = "polymarket.snapshots"
+	DefaultKalshiTopic = "kalshi.snapshots"
+	DefaultMatchTopic  = "matches.live"
 )
 
 func Brokers() []string {
