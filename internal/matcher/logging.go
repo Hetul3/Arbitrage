@@ -3,7 +3,9 @@ package matcher
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/hetulpatel/Arbitrage/internal/models"
 )
@@ -59,6 +61,7 @@ func (l *Logger) LogMatch(source *models.MarketSnapshot, res *Result, threshold 
 		dstJSON, _ := json.MarshalIndent(res.Target, "", "  ")
 		fmt.Printf("[matcher] match sim=%.4f threshold=%.4f\nsource=%s\nmatch=%s\n", res.Similarity, threshold, string(srcJSON), string(dstJSON))
 	}
+	l.appendToFile(source, res.Target, res.Similarity, threshold)
 }
 
 func safeQuestion(snap *models.MarketSnapshot) string {
@@ -71,5 +74,29 @@ func safeQuestion(snap *models.MarketSnapshot) string {
 		return snap.Event.Title
 	default:
 		return snap.Market.MarketID
+	}
+}
+
+func (l *Logger) appendToFile(source, target *models.MarketSnapshot, sim, threshold float64) {
+	entry := map[string]any{
+		"timestamp":  time.Now().UTC().Format(time.RFC3339Nano),
+		"similarity": sim,
+		"threshold":  threshold,
+		"source":     source,
+		"target":     target,
+	}
+	data, err := json.MarshalIndent(entry, "", "  ")
+	if err != nil {
+		fmt.Printf("[matcher] log file marshal error: %v\n", err)
+		return
+	}
+	f, err := os.OpenFile("matches.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		fmt.Printf("[matcher] log file open error: %v\n", err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		fmt.Printf("[matcher] log file write error: %v\n", err)
 	}
 }

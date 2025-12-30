@@ -98,7 +98,11 @@ func (c *Client) Fetch(ctx context.Context, opts collectors.FetchOptions) ([]col
 			log.Printf("[polymarket] skip event %s: %v", summary.ID, err)
 			continue
 		}
-		events = append(events, c.normalizeEvent(ctx, ev))
+
+		norm := c.normalizeEvent(ctx, ev)
+		if len(norm.Markets) > 0 {
+			events = append(events, norm)
+		}
 	}
 
 	if len(list) < pageSize {
@@ -214,6 +218,9 @@ func (c *Client) normalizeEvent(ctx context.Context, ev *eventDetail) collectors
 
 	for _, m := range ev.Markets {
 		if isPlaceholderMarket(&m) {
+			continue
+		}
+		if m.Closed || !m.Active {
 			continue
 		}
 		norm.Markets = append(norm.Markets, c.normalizeMarket(ctx, ev, &m))
@@ -392,6 +399,8 @@ type market struct {
 	ClobTokenIds   string  `json:"clobTokenIds"`
 	MinTickSize    float64 `json:"orderPriceMinTickSize"`
 	EndDate        string  `json:"endDate"`
+	Active         bool    `json:"active"`
+	Closed         bool    `json:"closed"`
 }
 
 type clobBook struct {

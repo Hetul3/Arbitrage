@@ -263,6 +263,9 @@ func (c *Client) normalizeEvent(ctx context.Context, detail *eventDetail, series
 		markets = ev.Markets
 	}
 	for _, m := range markets {
+		if m.Status != "active" {
+			continue
+		}
 		norm.Markets = append(norm.Markets, c.normalizeMarket(ctx, ev, &m, series))
 	}
 	return norm
@@ -385,6 +388,8 @@ type market struct {
 	Ticker         string `json:"ticker"`
 	Title          string `json:"title"`
 	SubTitle       string `json:"sub_title"`
+	Status         string `json:"status"`
+	Result         string `json:"result"`
 	YesAsk         int64  `json:"yes_ask"`
 	YesBid         int64  `json:"yes_bid"`
 	NoAsk          int64  `json:"no_ask"`
