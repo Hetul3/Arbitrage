@@ -36,8 +36,9 @@ Collectors -> Kafka (snapshots) -> Snapshot Worker
    - Venue-specific workers consume the snapshot topics, build an embedding string (`event_title`, `question`, settle date, trimmed description + subtitle), call Nebius, and upsert vectors + metadata (venue, IDs, `captured_at`, `captured_at_unix`, `close_time`, `text_hash`, `resolution_hash`) into Chroma. No Redis cache yet—every snapshot is embedded on the fly.
    - Each Chroma entry uses the deterministic ID `venue:market_id` (so new snapshots overwrite the same vector) and stores the full `MarketSnapshot` JSON in the `document` field for later re-use.
 
-3. **Snapshot Worker (future stage)**
-   - Will ensure an embedding exists via Redis cache (`emb:<platform>:<market_id>:<text_hash>`). Misses call Nebius embeddings, store result in Redis (multi-day TTL), and immediately upsert to Chroma.
+3. **Snapshot Worker**
+   - Current implementation consumes `matches.live`, runs the taker-only arb pre-check with the captured orderbooks, and **only** forwards profitable + tradable pairs into the Nebius LLM validator (GPT-OSS 120B, temperature 0). The validator receives a structured JSON blob (both venues’ questions, rules text, settlement sources, cutoff times, Kalshi contract PDF excerpt) and returns `{ValidResolution, ResolutionReason}`; the worker logs the verdict for each pair.
+   - Next iterations will ensure an embedding exists via Redis cache (`emb:<platform>:<market_id>:<text_hash>`). Misses call Nebius embeddings, store result in Redis (multi-day TTL), and immediately upsert to Chroma.
    - Will query Chroma for opposite-venue markets: topK=3 within last-hour freshness, cosine similarity ≥ threshold (currently 0.95), and optional category match.
    - For each candidate result:
      - Construct a `pair_id` (e.g., `sha256("poly:<id>|kalshi:<id>")`).
@@ -63,7 +64,7 @@ Collectors -> Kafka (snapshots) -> Snapshot Worker
 | `kalshi_collector` | Paginate events/markets, fetch per-market detail + orderbook snippets, normalize, store, publish. |
 | `polymarket_worker` / `_dev` | Consumes `polymarket.snapshots`, embeds each market via Nebius, and upserts vectors + metadata into Chroma (prod logs summaries, dev can dump payloads). |
 | `kalshi_worker` / `_dev` | Same as above for the Kalshi topic. |
-| `snapshot_worker` | Placeholder for the future matching/arb stage that will read from Chroma/Kafka once embeddings are in place. |
+| `snapshot_worker` | Consumes matches, runs the taker-only arb pre-check, and forwards only profitable + tradable pairs to the Nebius LLM validator (includes Kalshi contract PDF extraction + structured verdict logging). |
 | `chroma_maintainer` | Periodically deletes entries older than 1 hour to keep vector store fresh. |
 | `cli_consumer` | Displays live opportunities; later replaced/augmented by HTTP API. |
 

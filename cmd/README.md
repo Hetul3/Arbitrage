@@ -17,5 +17,6 @@ Current commands:
 - `chroma_query` – cross-venue similarity search starting from a market ID.
 - `chroma_search` – natural language vector search across all venues.
 - `arb_engine` – consumes match payloads, runs the depth-aware fee-inclusive arbitrage simulation, and logs the result.
+- `snapshot_worker` – consumes matches, keeps only profitable/tradable pairs, and forwards them to the upcoming LLM validation stage.
 
 Each command has its own README with usage instructions and docker-compose targets.

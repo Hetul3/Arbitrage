@@ -194,6 +194,26 @@ services:
       ARB_ENGINE_WORKERS: ${ARB_ENGINE_WORKERS:-1}
       ARB_ENGINE_BUDGET_USD: ${ARB_ENGINE_BUDGET_USD:-100}
 
+  snapshot-worker:
+    <<: *go-service
+    depends_on:
+      - kafka-broker
+    command: [ "go", "run", "./cmd/snapshot_worker" ]
+    environment:
+      GO111MODULE: "on"
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
+      MATCHES_KAFKA_TOPIC: ${MATCHES_KAFKA_TOPIC:-matches.live}
+      SNAPSHOT_WORKER_GROUP: ${SNAPSHOT_WORKER_GROUP:-snapshot-worker}
+      SNAPSHOT_WORKER_CONCURRENCY: ${SNAPSHOT_WORKER_CONCURRENCY:-1}
+      SNAPSHOT_WORKER_BUDGET_USD: ${SNAPSHOT_WORKER_BUDGET_USD:-100}
+      SNAPSHOT_WORKER_FORCE_VALIDATION: ${SNAPSHOT_WORKER_FORCE_VALIDATION:-0}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY}
+      NEBIUS_BASE_URL: ${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1/}
+      VALIDATOR_MODEL: ${VALIDATOR_MODEL:-openai/gpt-oss-120b}
+      VALIDATOR_TIMEOUT_SECONDS: ${VALIDATOR_TIMEOUT_SECONDS:-45}
+      VALIDATOR_MAX_TOKENS: ${VALIDATOR_MAX_TOKENS:-800}
+      VALIDATOR_SYSTEM_PROMPT: ${VALIDATOR_SYSTEM_PROMPT:-}
+
   sqlite-create:
     <<: *go-service
     command: [ "go", "run", "./cmd/sqlite_create_tables" ]

@@ -8,3 +8,4 @@ data/*.db-wal
 data/*.db-shm
 data/chroma/
 matches.log
+validator.log

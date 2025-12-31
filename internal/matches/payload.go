@@ -11,14 +11,15 @@ import (
 
 // Payload is the envelope published by the matcher and consumed by the arb engine.
 type Payload struct {
-	Version    int                   `json:"version"`
-	PairID     string                `json:"pair_id"`
-	Similarity float64               `json:"similarity"`
-	Distance   float64               `json:"distance"`
-	MatchedAt  time.Time             `json:"matched_at"`
-	Source     models.MarketSnapshot `json:"source"`
-	Target     models.MarketSnapshot `json:"target"`
-	Arbitrage  *Opportunity          `json:"arbitrage,omitempty"`
+	Version           int                   `json:"version"`
+	PairID            string                `json:"pair_id"`
+	Similarity        float64               `json:"similarity"`
+	Distance          float64               `json:"distance"`
+	MatchedAt         time.Time             `json:"matched_at"`
+	Source            models.MarketSnapshot `json:"source"`
+	Target            models.MarketSnapshot `json:"target"`
+	Arbitrage         *Opportunity          `json:"arbitrage,omitempty"`
+	ResolutionVerdict *ResolutionVerdict    `json:"resolution_verdict,omitempty"`
 }
 
 const payloadVersion = 1

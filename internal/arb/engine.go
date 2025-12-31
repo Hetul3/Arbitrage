@@ -10,7 +10,8 @@ import (
 )
 
 type Config struct {
-	BudgetUSD float64
+	BudgetUSD    float64
+	ForceVerdict bool
 }
 
 type Result struct {
@@ -33,6 +34,19 @@ func Evaluate(match *matches.Payload, cfg Config) Result {
 	if pmSnap == nil || kxSnap == nil {
 		res.Untradable = true
 		res.Reason = "missing snapshots"
+		return res
+	}
+
+	if cfg.ForceVerdict {
+		forced := &matches.Opportunity{
+			Direction:    matches.DirectionBuyYesPMBuyNoKalshi,
+			Quantity:     1,
+			ProfitUSD:    0.01,
+			TotalCostUSD: 0.99,
+			BudgetUSD:    cfg.BudgetUSD,
+		}
+		res.Opportunities[forced.Direction] = forced
+		res.Best = forced
 		return res
 	}
 
