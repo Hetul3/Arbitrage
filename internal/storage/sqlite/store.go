@@ -77,13 +77,13 @@ func (s *Store) Close() error {
 
 // CreateTables ensures the unified markets table exists.
 func (s *Store) CreateTables(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, unifiedSchemaSQL)
+	_, err := s.db.ExecContext(ctx, unifiedSchemaSQL+arbSchemaSQL)
 	return err
 }
 
 // DropTables removes the unified table.
 func (s *Store) DropTables(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `DROP TABLE IF EXISTS markets;`)
+	_, err := s.db.ExecContext(ctx, `DROP TABLE IF EXISTS markets; DROP TABLE IF EXISTS arb_opportunities;`)
 	return err
 }
 
@@ -99,7 +99,8 @@ func (s *Store) MigrateToUnifiedSchema(ctx context.Context) error {
 		`DROP TABLE IF EXISTS markets;`,
 		`DROP TABLE IF EXISTS polymarket_markets;`,
 		`DROP TABLE IF EXISTS kalshi_markets;`,
-		unifiedSchemaSQL,
+		`DROP TABLE IF EXISTS arb_opportunities;`,
+		unifiedSchemaSQL + arbSchemaSQL,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -377,3 +378,34 @@ func serializeLevels(levels []collectors.OrderbookLevel) string {
 	}
 	return string(b)
 }
+
+const arbSchemaSQL = `
+CREATE TABLE IF NOT EXISTS arb_opportunities (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	pair_id TEXT NOT NULL,
+	source_venue TEXT NOT NULL,
+	source_market_id TEXT NOT NULL,
+	source_question TEXT,
+	source_yes_price REAL,
+	source_no_price REAL,
+	target_venue TEXT NOT NULL,
+	target_market_id TEXT NOT NULL,
+	target_question TEXT,
+	target_yes_price REAL,
+	target_no_price REAL,
+	similarity REAL NOT NULL,
+	distance REAL NOT NULL,
+	matched_at TEXT NOT NULL,
+	processed_at TEXT NOT NULL,
+	direction TEXT NOT NULL,
+	qty_contracts REAL NOT NULL,
+	total_cost_usd REAL NOT NULL,
+	profit_usd REAL NOT NULL,
+	budget_usd REAL NOT NULL,
+	kalshi_fees_usd REAL NOT NULL,
+	polymarket_fees_usd REAL NOT NULL,
+	legs_json TEXT NOT NULL,
+	raw_payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS arb_opportunities_pair_idx ON arb_opportunities(pair_id);
+`

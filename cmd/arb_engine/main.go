@@ -13,6 +13,7 @@ import (
 	"github.com/hetulpatel/Arbitrage/internal/arb"
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
 	"github.com/hetulpatel/Arbitrage/internal/matches"
+	sqlstore "github.com/hetulpatel/Arbitrage/internal/storage/sqlite"
 )
 
 func main() {
@@ -37,11 +38,17 @@ func main() {
 	}
 	cancelEnsure()
 
+	store, err := sqlstore.Open(os.Getenv("SQLITE_PATH"))
+	if err != nil {
+		log.Fatalf("[arb-engine] open sqlite: %v", err)
+	}
+	defer store.Close()
+
 	log.Printf("[arb-engine] consuming %s with group %s (%d workers, budget=%.2f)", topic, group, workerCount, budget)
-	runWorkers(ctx, brokers, topic, group, workerCount, budget)
+	runWorkers(ctx, brokers, topic, group, workerCount, budget, store)
 }
 
-func runWorkers(ctx context.Context, brokers []string, topic, group string, workerCount int, budget float64) {
+func runWorkers(ctx context.Context, brokers []string, topic, group string, workerCount int, budget float64, store *sqlstore.Store) {
 	if workerCount <= 0 {
 		workerCount = 1
 	}
@@ -50,14 +57,14 @@ func runWorkers(ctx context.Context, brokers []string, topic, group string, work
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			consume(ctx, brokers, topic, group, budget)
+			consume(ctx, brokers, topic, group, budget, store)
 		}(i)
 	}
 	<-ctx.Done()
 	wg.Wait()
 }
 
-func consume(ctx context.Context, brokers []string, topic, group string, budget float64) {
+func consume(ctx context.Context, brokers []string, topic, group string, budget float64, store *sqlstore.Store) {
 	reader := kafka.NewReader(brokers, topic, group)
 	defer reader.Close()
 
@@ -81,6 +88,9 @@ func consume(ctx context.Context, brokers []string, topic, group string, budget 
 			payload.Arbitrage = result.Best
 		}
 		logOpportunity(&payload, result)
+		if err := store.InsertArbOpportunity(ctx, &payload, result); err != nil {
+			log.Printf("[arb-engine] sqlite error: %v", err)
+		}
 	}
 }
 
@@ -89,8 +99,14 @@ func logOpportunity(payload *matches.Payload, result arb.Result) {
 	if pairID == "" {
 		pairID = "unknown"
 	}
+
+	if result.Untradable {
+		log.Printf("[arb-engine] pair=%s UNTRADABLE reason=%s", pairID, result.Reason)
+		return
+	}
+
 	if result.Best == nil || result.Best.Quantity <= 0 {
-		log.Printf("[arb-engine] pair=%s no opportunity", pairID)
+		log.Printf("[arb-engine] pair=%s no opportunity found", pairID)
 		return
 	}
 	log.Printf("[arb-engine] pair=%s dir=%s qty=%.2f cost=%.4f profit=%.4f fees=%.4f", pairID, result.Best.Direction, result.Best.Quantity, result.Best.TotalCostUSD, result.Best.ProfitUSD, result.Best.KalshiFeesUSD+result.Best.PolymarketFeesUSD)

@@ -16,6 +16,8 @@ type Config struct {
 type Result struct {
 	Opportunities map[matches.Direction]*matches.Opportunity
 	Best          *matches.Opportunity
+	Untradable    bool
+	Reason        string
 }
 
 const epsilon = 1e-9
@@ -29,6 +31,14 @@ func Evaluate(match *matches.Payload, cfg Config) Result {
 
 	pmSnap, kxSnap := extractSnapshots(match)
 	if pmSnap == nil || kxSnap == nil {
+		res.Untradable = true
+		res.Reason = "missing snapshots"
+		return res
+	}
+
+	if reason, untradable := isUntradable(pmSnap, kxSnap); untradable {
+		res.Untradable = true
+		res.Reason = reason
 		return res
 	}
 
@@ -48,7 +58,85 @@ func Evaluate(match *matches.Payload, cfg Config) Result {
 		}
 	}
 
+	if res.Best == nil {
+		res.Untradable = true
+		res.Reason = "no profitable direction"
+	}
+
 	return res
+}
+
+func isUntradable(pm, kx *models.MarketSnapshot) (string, bool) {
+	// Assumes prices are in [0,1]. epsilon should be small (e.g., 1e-9).
+
+	// Tunables (picked to mean "pass unless it's basically useless")
+	const (
+		MAX_SPREAD = 0.05 // >5c top-of-book spread = basically not tradable
+		DUST_BID   = 0.01 // 1c bid
+		DUST_ASK   = 0.03 // 3c ask
+		LOW_ASK    = 0.05 // <=5c ask region often indicates longshot "dust"
+		LOW_SPREAD = 0.02 // >=2c spread at penny prices => dust
+	)
+
+	// sideBad returns true if that side is effectively untradable (no real executable quote, absurd spread, or "dust").
+	sideBad := func(bid, ask float64) bool {
+		// Missing / non-executable
+		if ask <= epsilon || bid < 0.0 || ask < 0.0 {
+			return true
+		}
+
+		// If bid is basically missing, you can't realistically sell; if ask missing, can't buy
+		// (We treat bid<=epsilon as "bad" too because it often signals empty book.)
+		if bid <= epsilon {
+			return true
+		}
+
+		spread := ask - bid
+		if spread < 0 {
+			// Crossed/locked book: not necessarily untradable, but data is suspect; treat as bad for safety.
+			return true
+		}
+
+		// Absurd spread
+		if spread > MAX_SPREAD {
+			return true
+		}
+
+		// "Dust" patterns: penny bids with a few-cent ask, or very low ask with wide relative spread
+		if bid <= DUST_BID && ask >= DUST_ASK {
+			return true
+		}
+		if ask <= LOW_ASK && spread >= LOW_SPREAD {
+			return true
+		}
+
+		return false
+	}
+
+	// venueBad returns true if BOTH sides are bad (meaning: you can't sensibly trade either Yes or No on that venue).
+	venueBad := func(ms *models.MarketSnapshot) bool {
+		yesBad := sideBad(ms.Market.Price.YesBid, ms.Market.Price.YesAsk)
+		noBad := sideBad(ms.Market.Price.NoBid, ms.Market.Price.NoAsk)
+		return yesBad && noBad
+	}
+
+	// 1) Basic liquidity sanity: at least one ask on each venue (otherwise dead)
+	if pm.Market.Price.YesAsk <= epsilon && pm.Market.Price.NoAsk <= epsilon {
+		return "polymarket zero liquidity (asks)", true
+	}
+	if kx.Market.Price.YesAsk <= epsilon && kx.Market.Price.NoAsk <= epsilon {
+		return "kalshi zero liquidity (asks)", true
+	}
+
+	// 2) Tradability check: only fail a venue if BOTH sides are bad
+	if venueBad(pm) {
+		return "polymarket both sides effectively untradable", true
+	}
+	if venueBad(kx) {
+		return "kalshi both sides effectively untradable", true
+	}
+
+	return "", false
 }
 
 func extractSnapshots(match *matches.Payload) (*models.MarketSnapshot, *models.MarketSnapshot) {
