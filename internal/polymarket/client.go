@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -346,6 +347,12 @@ func convertClobBook(b clobBook) collectors.Orderbook {
 			RawAmount: size,
 		})
 	}
+	sort.Slice(out.Bids, func(i, j int) bool {
+		return out.Bids[i].Price > out.Bids[j].Price
+	})
+	sort.Slice(out.Asks, func(i, j int) bool {
+		return out.Asks[i].Price < out.Asks[j].Price
+	})
 	return out
 }
 

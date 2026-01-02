@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -362,6 +363,9 @@ func convertLevels(levels [][]int64) []collectors.OrderbookLevel {
 			RawAmount: qty,
 		})
 	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Price > out[j].Price
+	})
 	return out
 }
 
