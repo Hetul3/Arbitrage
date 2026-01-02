@@ -7,6 +7,16 @@ x-go-service: &go-service
     - .:/app
 
 services:
+  redis:
+    image: redis:7.4.1-alpine
+    command: [ "redis-server", "--save", "900", "1", "--save", "300", "10", "--appendonly", "yes" ]
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    logging:
+      driver: "none"
+
   chromadb:
     image: chromadb/chroma:0.5.4
     environment:
@@ -98,6 +108,7 @@ services:
     depends_on:
       - kafka-broker
       - chromadb
+      - redis
     command: [ "go", "run", "./cmd/polymarket_worker" ]
     environment:
       GO111MODULE: "on"
@@ -115,12 +126,17 @@ services:
       NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}
       CHROMA_URL: ${CHROMA_URL:-http://chromadb:8000}
       CHROMA_COLLECTION: ${CHROMA_COLLECTION:-market_snapshots}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_EMBED_TTL_HOURS: ${REDIS_EMBED_TTL_HOURS:-240}
 
   polymarket-worker-dev:
     <<: *go-service
     depends_on:
       - kafka-broker
       - chromadb
+      - redis
     command: [ "go", "run", "./cmd/polymarket_worker_dev" ]
     environment:
       GO111MODULE: "on"
@@ -138,12 +154,18 @@ services:
       NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}
       CHROMA_URL: ${CHROMA_URL:-http://chromadb:8000}
       CHROMA_COLLECTION: ${CHROMA_COLLECTION:-market_snapshots}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_EMBED_TTL_HOURS: ${REDIS_EMBED_TTL_HOURS:-240}
+      REDIS_EMBED_LOG_HITS: ${REDIS_EMBED_LOG_HITS:-1}
 
   kalshi-worker:
     <<: *go-service
     depends_on:
       - kafka-broker
       - chromadb
+      - redis
     command: [ "go", "run", "./cmd/kalshi_worker" ]
     environment:
       GO111MODULE: "on"
@@ -161,12 +183,17 @@ services:
       NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}
       CHROMA_URL: ${CHROMA_URL:-http://chromadb:8000}
       CHROMA_COLLECTION: ${CHROMA_COLLECTION:-market_snapshots}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_EMBED_TTL_HOURS: ${REDIS_EMBED_TTL_HOURS:-240}
 
   kalshi-worker-dev:
     <<: *go-service
     depends_on:
       - kafka-broker
       - chromadb
+      - redis
     command: [ "go", "run", "./cmd/kalshi_worker_dev" ]
     environment:
       GO111MODULE: "on"
@@ -184,6 +211,11 @@ services:
       NEBIUS_EMBED_MODEL: ${NEBIUS_EMBED_MODEL:-}
       CHROMA_URL: ${CHROMA_URL:-http://chromadb:8000}
       CHROMA_COLLECTION: ${CHROMA_COLLECTION:-market_snapshots}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_EMBED_TTL_HOURS: ${REDIS_EMBED_TTL_HOURS:-240}
+      REDIS_EMBED_LOG_HITS: ${REDIS_EMBED_LOG_HITS:-1}
 
   arb-engine:
     <<: *go-service

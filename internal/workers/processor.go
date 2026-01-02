@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hetulpatel/Arbitrage/internal/cache"
 	"github.com/hetulpatel/Arbitrage/internal/chroma"
 	"github.com/hetulpatel/Arbitrage/internal/embed"
 	"github.com/hetulpatel/Arbitrage/internal/hashutil"
+	"github.com/hetulpatel/Arbitrage/internal/logging"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 )
 
@@ -17,10 +19,12 @@ type Processor struct {
 	chromaClient *chroma.Client
 	collectionID string
 	venue        string
+	cache        cache.EmbeddingCache
+	logCache     bool
 }
 
-func NewProcessor(embedClient *embed.Client, chromaClient *chroma.Client, collectionID string, venue string) *Processor {
-	return &Processor{embedClient: embedClient, chromaClient: chromaClient, collectionID: collectionID, venue: venue}
+func NewProcessor(embedClient *embed.Client, chromaClient *chroma.Client, collectionID string, venue string, cache cache.EmbeddingCache, logCache bool) *Processor {
+	return &Processor{embedClient: embedClient, chromaClient: chromaClient, collectionID: collectionID, venue: venue, cache: cache, logCache: logCache}
 }
 
 func (p *Processor) Handle(ctx context.Context, snap *models.MarketSnapshot) ([]float32, error) {
@@ -29,9 +33,32 @@ func (p *Processor) Handle(ctx context.Context, snap *models.MarketSnapshot) ([]
 		return nil, fmt.Errorf("empty embedding text for market %s", snap.Market.MarketID)
 	}
 
-	embedding, err := p.embedClient.Embed(ctx, text)
-	if err != nil {
-		return nil, fmt.Errorf("embed: %w", err)
+	key := buildEmbeddingKey(snap, text)
+	var embedding []float32
+	var err error
+
+	cacheMiss := false
+	if p.cache != nil && key != "" {
+		if cached, ok, cacheErr := p.cache.Get(ctx, key); cacheErr == nil && ok {
+			if p.logCache {
+				logging.Infof("[embed-cache] hit key=%s", key)
+			}
+			embedding = cached
+		} else if cacheErr != nil {
+			return nil, fmt.Errorf("redis get: %w", cacheErr)
+		} else {
+			cacheMiss = true
+			if p.logCache {
+				logging.Infof("[embed-cache] miss key=%s", key)
+			}
+		}
+	}
+
+	if embedding == nil {
+		embedding, err = p.embedClient.Embed(ctx, text)
+		if err != nil {
+			return nil, fmt.Errorf("embed: %w", err)
+		}
 	}
 
 	metadata := buildMetadata(snap, text)
@@ -52,6 +79,15 @@ func (p *Processor) Handle(ctx context.Context, snap *models.MarketSnapshot) ([]
 
 	if err := p.chromaClient.Upsert(ctx, p.collectionID, upsertReq); err != nil {
 		return nil, fmt.Errorf("chroma upsert: %w", err)
+	}
+
+	if embedding != nil && p.cache != nil && key != "" && cacheMiss {
+		if err := p.cache.Set(ctx, key, embedding); err != nil {
+			return nil, fmt.Errorf("redis set: %w", err)
+		}
+		if p.logCache {
+			logging.Infof("[embed-cache] stored key=%s", key)
+		}
 	}
 
 	return embedding, nil
@@ -79,4 +115,12 @@ func buildMetadata(snap *models.MarketSnapshot, embeddingText string) map[string
 	}
 
 	return metadata
+}
+
+func buildEmbeddingKey(snap *models.MarketSnapshot, embeddingText string) string {
+	if snap == nil {
+		return ""
+	}
+	textHash := hashutil.HashStrings(embeddingText)
+	return fmt.Sprintf("%s:%s:%s", snap.Venue, snap.Market.MarketID, textHash)
 }

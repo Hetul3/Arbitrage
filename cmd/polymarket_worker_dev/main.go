@@ -12,6 +12,7 @@ import (
 
 	kafkago "github.com/segmentio/kafka-go"
 
+	"github.com/hetulpatel/Arbitrage/internal/cache"
 	"github.com/hetulpatel/Arbitrage/internal/chroma"
 	"github.com/hetulpatel/Arbitrage/internal/embed"
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
@@ -45,7 +46,14 @@ func main() {
 
 	embedClient := mustEmbedClient()
 	chromaClient, collectionID := mustChromaClient(ctx)
-	processor := workers.NewProcessor(embedClient, chromaClient, collectionID, "polymarket")
+	embedCache := mustEmbeddingCache()
+	defer func() {
+		if embedCache != nil {
+			embedCache.Close()
+		}
+	}()
+	logCache := envBool("REDIS_EMBED_LOG_HITS", false)
+	processor := workers.NewProcessor(embedClient, chromaClient, collectionID, "polymarket", embedCache, logCache)
 	finder := mustFinder(chromaClient, collectionID, envBool("MATCH_DEBUG", false))
 	matchWriter := setupMatchWriter(ctx, brokers)
 	defer func() {
@@ -152,6 +160,20 @@ func envBool(key string, def bool) bool {
 		}
 	}
 	return def
+}
+
+func mustEmbeddingCache() cache.EmbeddingCache {
+	addr := envString("REDIS_ADDR", "redis:6379")
+	if addr == "" {
+		return nil
+	}
+	db := envInt("REDIS_DB", 0)
+	ttlHours := envInt("REDIS_EMBED_TTL_HOURS", 240)
+	cacheClient, err := cache.NewRedisEmbeddingCache(addr, os.Getenv("REDIS_PASSWORD"), db, time.Duration(ttlHours)*time.Hour, "emb")
+	if err != nil {
+		log.Fatalf("[polymarket-worker-dev] redis cache: %v", err)
+	}
+	return cacheClient
 }
 
 func envFloat(key string, def float64) float64 {

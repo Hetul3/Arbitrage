@@ -22,15 +22,15 @@ run-collectors-dev:
 	$(DOCKER_COMPOSE) up --build polymarket-collector-dev kalshi-collector-dev
 
 run-kafka:
-	$(DOCKER_COMPOSE) up --build -d chromadb zookeeper kafka-broker
+	$(DOCKER_COMPOSE) up --build -d redis chromadb zookeeper kafka-broker
 	$(DOCKER_COMPOSE) up --build --no-deps polymarket-collector kalshi-collector polymarket-worker kalshi-worker snapshot-worker arb-engine
 
 run-kafka-dev:
-	$(DOCKER_COMPOSE) up --build -d chromadb zookeeper kafka-broker
+	$(DOCKER_COMPOSE) up --build -d redis chromadb zookeeper kafka-broker
 	$(DOCKER_COMPOSE) up --build --no-deps polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev snapshot-worker arb-engine
 
 run-kafka-dev-verbose:
-	$(DOCKER_COMPOSE) up --build -d chromadb zookeeper kafka-broker
+	$(DOCKER_COMPOSE) up --build -d redis chromadb zookeeper kafka-broker
 	POLYMARKET_WORKER_VERBOSE=1 KALSHI_WORKER_VERBOSE=1 $(DOCKER_COMPOSE) up --build --no-deps polymarket-collector kalshi-collector polymarket-worker-dev kalshi-worker-dev snapshot-worker arb-engine
 
 sqlite-create:
@@ -47,6 +47,12 @@ sqlite-migrate:
 
 collectors-down:
 	$(DOCKER_COMPOSE) down --remove-orphans
+
+redis-cache-list:
+	$(DOCKER_COMPOSE) exec redis sh -c "redis-cli --scan --pattern 'emb:*'"
+
+redis-cache-clear:
+	$(DOCKER_COMPOSE) exec redis sh -c "keys=$$(redis-cli --scan --pattern 'emb:*'); if [ -n \"$$keys\" ]; then echo $$keys | xargs redis-cli DEL; fi"
 
 chroma-inspect:
 	go run ./cmd/chroma_inspect/main.go

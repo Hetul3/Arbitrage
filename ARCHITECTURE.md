@@ -179,7 +179,7 @@ The arb engine consumes this topic, simulates both legs with slippage + fees, an
 
 | Key | Purpose | TTL |
 | --- | --- | --- |
-| `emb:<platform>:<market_id>:<text_hash>` | Cached Nebius embedding for title+description. | ≥5 days (LRU acceptable). |
+| `emb:<platform>:<market_id>:<text_hash>` | Cached Nebius embedding for title+description. | ≥10 days (RDB snapshot). |
 | `pair_bundle:<poly_id>:<kalshi_id>:<poly_hash>:<kalshi_hash>` | Stores `{verdict, last_profit_usd, edge_bps, max_size, updated_at}` for combined match/LLM result. | Long TTL (days) with LRU eviction acceptable. |
 | `pair_inflight:<pair_id>` | Short lock to prevent duplicate processing. | ~60 seconds. |
 
