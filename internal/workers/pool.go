@@ -3,12 +3,12 @@ package workers
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"sync"
 
 	kafkago "github.com/segmentio/kafka-go"
 
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
+	"github.com/hetulpatel/Arbitrage/internal/logging"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 )
 
@@ -41,19 +41,19 @@ func consume(ctx context.Context, reader *kafkago.Reader, handler Handler) {
 			if ctx.Err() != nil {
 				return
 			}
-			log.Printf("worker read error: %v", err)
+			logging.Errorf("worker read error: %v", err)
 			continue
 		}
 
 		var snapshot models.MarketSnapshot
 		if err := json.Unmarshal(msg.Value, &snapshot); err != nil {
-			log.Printf("worker unmarshal error: %v", err)
+			logging.Errorf("worker unmarshal error: %v", err)
 			continue
 		}
 
 		if handler != nil {
 			if err := handler(ctx, &snapshot); err != nil {
-				log.Printf("worker handler error: %v", err)
+				logging.Errorf("worker handler error: %v", err)
 			}
 		}
 	}

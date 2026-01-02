@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/hetulpatel/Arbitrage/internal/chroma"
 	"github.com/hetulpatel/Arbitrage/internal/collectors"
+	"github.com/hetulpatel/Arbitrage/internal/logging"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 )
 
@@ -193,5 +193,5 @@ func distanceAt(resp *chroma.QueryResponse, idx int) float64 {
 }
 
 func printDebug(msg string, fields ...interface{}) {
-	log.Printf("%s: %v", msg, fields)
+	logging.Debugf("%s: %v", msg, fields)
 }

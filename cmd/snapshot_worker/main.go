@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"strconv"
@@ -16,6 +15,7 @@ import (
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
 	"github.com/hetulpatel/Arbitrage/internal/kalshi"
 	"github.com/hetulpatel/Arbitrage/internal/llm"
+	"github.com/hetulpatel/Arbitrage/internal/logging"
 	"github.com/hetulpatel/Arbitrage/internal/matches"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 	"github.com/hetulpatel/Arbitrage/internal/polymarket"
@@ -29,6 +29,7 @@ const (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	logging.InitFromEnv()
 
 	brokers := kafka.Brokers()
 	topic := kafka.TopicFromEnv("MATCHES_KAFKA_TOPIC", kafka.DefaultMatchTopic)
@@ -38,7 +39,7 @@ func main() {
 
 	waitCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	if err := kafka.WaitForBroker(waitCtx, brokers); err != nil {
-		log.Fatalf("[snapshot-worker] wait for broker: %v", err)
+		logging.Fatalf("[snapshot-worker] wait for broker: %v", err)
 	}
 	cancel()
 
@@ -47,7 +48,7 @@ func main() {
 	pmClient := mustPolymarketClient()
 	kxClient := mustKalshiClient()
 
-	log.Printf("[snapshot-worker] consuming %s with group %s (%d workers, budget=%.2f)", topic, group, workerCount, budget)
+	logging.Infof("[snapshot-worker] consuming %s with group %s (%d workers, budget=%.2f)", topic, group, workerCount, budget)
 	runWorkers(ctx, brokers, topic, group, workerCount, budget, workerDeps{
 		validator:   valSvc,
 		pmClient:    pmClient,
@@ -68,7 +69,7 @@ func runWorkers(ctx context.Context, brokers []string, topic, group string, work
 		workerCount = 1
 	}
 	if deps.validator == nil {
-		log.Printf("[snapshot-worker] validator not configured; exiting")
+		logging.Errorf("[snapshot-worker] validator not configured; exiting")
 		return
 	}
 	var wg sync.WaitGroup
@@ -99,23 +100,23 @@ func consume(ctx context.Context, brokers []string, topic, group string, budget 
 			if ctx.Err() != nil {
 				return
 			}
-			log.Printf("[snapshot-worker] read error: %v", err)
+			logging.Errorf("[snapshot-worker] read error: %v", err)
 			continue
 		}
 
 		var payload matches.Payload
 		if err := json.Unmarshal(msg.Value, &payload); err != nil {
-			log.Printf("[snapshot-worker] unmarshal error: %v", err)
+			logging.Errorf("[snapshot-worker] unmarshal error: %v", err)
 			continue
 		}
 
 		result := arb.Evaluate(&payload, cfg)
 		if result.Untradable {
-			log.Printf("[snapshot-worker] pair=%s skipped (untradable: %s)", payload.PairID, result.Reason)
+			logging.Infof("[snapshot-worker] pair=%s skipped (untradable: %s)", payload.PairID, result.Reason)
 			continue
 		}
 		if result.Best == nil || result.Best.ProfitUSD <= profitEpsilon || result.Best.Quantity <= profitEpsilon {
-			log.Printf("[snapshot-worker] pair=%s skipped (no profitable direction)", payload.PairID)
+			logging.Infof("[snapshot-worker] pair=%s skipped (no profitable direction)", payload.PairID)
 			continue
 		}
 
@@ -127,7 +128,7 @@ func consume(ctx context.Context, brokers []string, topic, group string, budget 
 		} else {
 			res, err := deps.validator.Validate(ctx, &payload)
 			if err != nil {
-				log.Printf("[snapshot-worker] validator error pair=%s: %v", payload.PairID, err)
+				logging.Errorf("[snapshot-worker] validator error pair=%s: %v", payload.PairID, err)
 				continue
 			}
 			verdict = matches.NewResolutionVerdict(res.ValidResolution, res.ResolutionReason)
@@ -138,7 +139,7 @@ func consume(ctx context.Context, brokers []string, topic, group string, budget 
 		appendValidationLog(&payload)
 		if verdict.ValidResolution {
 			if err := deps.runFinalStage(ctx, &payload); err != nil {
-				log.Printf("[snapshot-worker] final stage error pair=%s: %v", payload.PairID, err)
+				logging.Errorf("[snapshot-worker] final stage error pair=%s: %v", payload.PairID, err)
 			}
 		}
 	}
@@ -150,7 +151,7 @@ func logLLMResult(payload *matches.Payload) {
 	}
 	pm := questionForVenue(payload, collectors.VenuePolymarket)
 	kx := questionForVenue(payload, collectors.VenueKalshi)
-	log.Printf("[snapshot-worker] LLM pair=%s polymarket=\"%s\" kalshi=\"%s\" valid=%t reason=%s",
+	logging.Infof("[snapshot-worker] LLM pair=%s polymarket=\"%s\" kalshi=\"%s\" valid=%t reason=%s",
 		payload.PairID, pm, kx, payload.ResolutionVerdict.ValidResolution, payload.ResolutionVerdict.ResolutionReason)
 }
 
@@ -196,17 +197,17 @@ func appendValidationLog(payload *matches.Payload) {
 	}
 	data, err := json.MarshalIndent(entry, "", "  ")
 	if err != nil {
-		log.Printf("[snapshot-worker] validator log marshal error: %v", err)
+		logging.Errorf("[snapshot-worker] validator log marshal error: %v", err)
 		return
 	}
 	f, err := os.OpenFile("validator.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		log.Printf("[snapshot-worker] validator log open error: %v", err)
+		logging.Errorf("[snapshot-worker] validator log open error: %v", err)
 		return
 	}
 	defer f.Close()
 	if _, err := f.Write(append(data, '\n')); err != nil {
-		log.Printf("[snapshot-worker] validator log write error: %v", err)
+		logging.Errorf("[snapshot-worker] validator log write error: %v", err)
 	}
 }
 
@@ -251,11 +252,11 @@ func (d workerDeps) runFinalStage(parentCtx context.Context, payload *matches.Pa
 	payload.FinalOpportunity = result.Best
 
 	if result.Best == nil {
-		log.Printf("[snapshot-worker] pair=%s final arb found no profitable direction", payload.PairID)
+		fmt.Printf("[snapshot-worker] final pair=%s no profitable direction after refresh\n", payload.PairID)
 		appendFinalLog(payload)
 		return nil
 	}
-	log.Printf("[snapshot-worker] pair=%s final arb dir=%s qty=%.2f profit=%.4f", payload.PairID, result.Best.Direction, result.Best.Quantity, result.Best.ProfitUSD)
+	fmt.Printf("[snapshot-worker] final pair=%s dir=%s qty=%.2f profit=%.4f\n", payload.PairID, result.Best.Direction, result.Best.Quantity, result.Best.ProfitUSD)
 	appendFinalLog(payload)
 	return nil
 }
@@ -271,7 +272,7 @@ func mustLLMClient() *llm.Client {
 	}
 	client, err := llm.New(cfg)
 	if err != nil {
-		log.Fatalf("[snapshot-worker] llm client: %v", err)
+		logging.Fatalf("[snapshot-worker] llm client: %v", err)
 	}
 	return client
 }
@@ -284,7 +285,7 @@ func mustValidatorService(llmClient *llm.Client) *validator.Service {
 		SystemPrompt: envString("VALIDATOR_SYSTEM_PROMPT", ""),
 	})
 	if err != nil {
-		log.Fatalf("[snapshot-worker] validator init: %v", err)
+		logging.Fatalf("[snapshot-worker] validator init: %v", err)
 	}
 	return svc
 }
@@ -318,17 +319,17 @@ func appendFinalLog(payload *matches.Payload) {
 	}
 	data, err := json.MarshalIndent(entry, "", "  ")
 	if err != nil {
-		log.Printf("[snapshot-worker] final log marshal error: %v", err)
+		logging.Errorf("[snapshot-worker] final log marshal error: %v", err)
 		return
 	}
 	f, err := os.OpenFile("final_arb.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		log.Printf("[snapshot-worker] final log open error: %v", err)
+		logging.Errorf("[snapshot-worker] final log open error: %v", err)
 		return
 	}
 	defer f.Close()
 	if _, err := f.Write(append(data, '\n')); err != nil {
-		log.Printf("[snapshot-worker] final log write error: %v", err)
+		logging.Errorf("[snapshot-worker] final log write error: %v", err)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hetulpatel/Arbitrage/internal/collectors"
+	"github.com/hetulpatel/Arbitrage/internal/logging"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 )
 
@@ -78,12 +78,12 @@ func (c *Client) Fetch(ctx context.Context, opts collectors.FetchOptions) ([]col
 		return nil, fmt.Errorf("polymarket list events: %w", err)
 	}
 	if len(list) == 0 {
-		log.Printf("[polymarket] reached end of events, resetting offset")
+		logging.Infof("[polymarket] reached end of events, resetting offset")
 		c.nextOffset = 0
 		return nil, nil
 	}
 
-	log.Printf("[polymarket] processing batch of %d summaries (offset: %d)", len(list), c.nextOffset)
+	logging.Infof("[polymarket] processing batch of %d summaries (offset: %d)", len(list), c.nextOffset)
 	var events []collectors.Event
 	for _, summary := range list {
 		select {
@@ -97,7 +97,7 @@ func (c *Client) Fetch(ctx context.Context, opts collectors.FetchOptions) ([]col
 		}
 		ev, err := c.fetchEvent(ctx, summary.ID)
 		if err != nil {
-			log.Printf("[polymarket] skip event %s: %v", summary.ID, err)
+			logging.Errorf("[polymarket] skip event %s: %v", summary.ID, err)
 			continue
 		}
 
@@ -108,7 +108,7 @@ func (c *Client) Fetch(ctx context.Context, opts collectors.FetchOptions) ([]col
 	}
 
 	if len(list) < pageSize {
-		log.Printf("[polymarket] reached end of events, resetting offset")
+		logging.Infof("[polymarket] reached end of events, resetting offset")
 		c.nextOffset = 0
 	} else {
 		c.nextOffset += pageSize

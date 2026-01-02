@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	"github.com/hetulpatel/Arbitrage/internal/collectors"
 	kafkautil "github.com/hetulpatel/Arbitrage/internal/kafka"
 	"github.com/hetulpatel/Arbitrage/internal/kalshi"
+	"github.com/hetulpatel/Arbitrage/internal/logging"
 	"github.com/hetulpatel/Arbitrage/internal/queue"
 	sqlstore "github.com/hetulpatel/Arbitrage/internal/storage/sqlite"
 )
@@ -20,10 +20,11 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	logging.InitFromEnv()
 
 	store, err := sqlstore.Open(os.Getenv("SQLITE_PATH"))
 	if err != nil {
-		log.Fatalf("open sqlite: %v", err)
+		logging.Fatalf("open sqlite: %v", err)
 	}
 	defer store.Close()
 
@@ -40,12 +41,12 @@ func main() {
 	}
 
 	collectors.RunLoop(ctx, collector, opts, func(ctx context.Context, events []collectors.Event) error {
-		log.Printf("[kalshi] fetched %d events", len(events))
+		logging.Infof("[kalshi] fetched %d events", len(events))
 		if err := store.UpsertKalshiEvents(ctx, events); err != nil {
 			return err
 		}
 		if err := queue.PublishSnapshots(ctx, writer, collectors.VenueKalshi, events); err != nil {
-			log.Printf("[kalshi] publish error: %v", err)
+			logging.Errorf("[kalshi] publish error: %v", err)
 		}
 		return nil
 	})
@@ -57,12 +58,12 @@ func setupWriter(ctx context.Context, envKey, fallbackTopic string) *kafkago.Wri
 	waitCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	if err := kafkautil.WaitForBroker(waitCtx, brokers); err != nil {
-		log.Printf("[kalshi] kafka unavailable: %v", err)
+		logging.Errorf("[kalshi] kafka unavailable: %v", err)
 		return nil
 	}
 	ensureCtx, cancelEnsure := context.WithTimeout(ctx, 30*time.Second)
 	if err := kafkautil.EnsureTopic(ensureCtx, brokers, topic); err != nil {
-		log.Printf("[kalshi] ensure topic warning: %v", err)
+		logging.Errorf("[kalshi] ensure topic warning: %v", err)
 	}
 	cancelEnsure()
 	return kafkautil.NewWriter(brokers, topic)

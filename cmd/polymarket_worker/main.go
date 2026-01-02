@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"os"
 	"os/signal"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"github.com/hetulpatel/Arbitrage/internal/chroma"
 	"github.com/hetulpatel/Arbitrage/internal/embed"
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
+	"github.com/hetulpatel/Arbitrage/internal/logging"
 	"github.com/hetulpatel/Arbitrage/internal/matcher"
 	"github.com/hetulpatel/Arbitrage/internal/matches"
 	"github.com/hetulpatel/Arbitrage/internal/models"
@@ -23,6 +23,7 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	logging.InitFromEnv()
 
 	brokers := kafka.Brokers()
 	topic := kafka.TopicFromEnv("POLYMARKET_KAFKA_TOPIC", kafka.DefaultPolyTopic)
@@ -31,13 +32,13 @@ func main() {
 
 	waitCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	if err := kafka.WaitForBroker(waitCtx, brokers); err != nil {
-		log.Fatalf("[polymarket-worker] wait for broker: %v", err)
+		logging.Fatalf("[polymarket-worker] wait for broker: %v", err)
 	}
 	cancel()
 
 	ensureCtx, cancelEnsure := context.WithTimeout(ctx, 30*time.Second)
 	if err := kafka.EnsureTopic(ensureCtx, brokers, topic); err != nil {
-		log.Printf("[polymarket-worker] ensure topic warning: %v", err)
+		logging.Errorf("[polymarket-worker] ensure topic warning: %v", err)
 	}
 	cancelEnsure()
 
@@ -54,7 +55,7 @@ func main() {
 
 	matchLogger := matcher.NewLogger(matcher.LogModeQuiet)
 
-	log.Printf("[polymarket-worker] consuming %s with group %s (%d workers)", topic, group, workerCount)
+	logging.Infof("[polymarket-worker] consuming %s with group %s (%d workers)", topic, group, workerCount)
 	workers.Run(ctx, brokers, topic, group, workerCount, func(ctx context.Context, snap *models.MarketSnapshot) error {
 		embedding, err := processor.Handle(ctx, snap)
 		if err != nil {
@@ -70,7 +71,7 @@ func main() {
 			matchLogger.LogMatch(snap, res, finder.Threshold())
 			publishMatch(ctx, matchWriter, snap, res)
 		}
-		log.Printf("[polymarket-worker] upserted market=%s event=%s", snap.Market.MarketID, snap.Event.EventID)
+		logging.Infof("[polymarket-worker] upserted market=%s event=%s", snap.Market.MarketID, snap.Event.EventID)
 		return nil
 	})
 }
@@ -83,7 +84,7 @@ func mustEmbedClient() *embed.Client {
 	}
 	client, err := embed.New(cfg)
 	if err != nil {
-		log.Fatalf("[polymarket-worker] embed client: %v", err)
+		logging.Fatalf("[polymarket-worker] embed client: %v", err)
 	}
 	return client
 }
@@ -96,7 +97,7 @@ func mustChromaClient(ctx context.Context) (*chroma.Client, string) {
 	defer cancel()
 	collection, err := client.EnsureCollection(ensureCtx, collectionName)
 	if err != nil {
-		log.Fatalf("[polymarket-worker] ensure chroma collection: %v", err)
+		logging.Fatalf("[polymarket-worker] ensure chroma collection: %v", err)
 	}
 	return client, collection.ID
 }
@@ -112,7 +113,7 @@ func mustFinder(client *chroma.Client, collectionID string, debug bool) *matcher
 	}
 	finder, err := matcher.NewFinder(cfg)
 	if err != nil {
-		log.Fatalf("[polymarket-worker] matcher config: %v", err)
+		logging.Fatalf("[polymarket-worker] matcher config: %v", err)
 	}
 	return finder
 }
@@ -141,7 +142,7 @@ func setupMatchWriter(ctx context.Context, brokers []string) *kafkago.Writer {
 	ensureCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := kafka.EnsureTopic(ensureCtx, brokers, topic); err != nil {
-		log.Printf("[polymarket-worker] ensure matches topic warning: %v", err)
+		logging.Errorf("[polymarket-worker] ensure matches topic warning: %v", err)
 	}
 	return kafka.NewWriter(brokers, topic)
 }
@@ -155,7 +156,7 @@ func publishMatch(ctx context.Context, writer *kafkago.Writer, source *models.Ma
 	payload := matches.NewPayload(sourceCopy, targetCopy, res.Similarity, res.Distance)
 	data, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("[polymarket-worker] marshal match error: %v", err)
+		logging.Errorf("[polymarket-worker] marshal match error: %v", err)
 		return
 	}
 	msg := kafkago.Message{
@@ -164,7 +165,7 @@ func publishMatch(ctx context.Context, writer *kafkago.Writer, source *models.Ma
 		Time:  payload.MatchedAt,
 	}
 	if err := writer.WriteMessages(ctx, msg); err != nil {
-		log.Printf("[polymarket-worker] publish match error: %v", err)
+		logging.Errorf("[polymarket-worker] publish match error: %v", err)
 	}
 }
 

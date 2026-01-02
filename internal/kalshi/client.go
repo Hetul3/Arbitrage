@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hetulpatel/Arbitrage/internal/collectors"
+	"github.com/hetulpatel/Arbitrage/internal/logging"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 )
 
@@ -88,7 +88,7 @@ func (c *Client) Fetch(ctx context.Context, opts collectors.FetchOptions) ([]col
 		return nil, fmt.Errorf("list kalshi events: %w", err)
 	}
 
-	log.Printf("[kalshi] processing batch of %d events (cursor: %s)", len(resp.Events), c.nextCursor)
+	logging.Infof("[kalshi] processing batch of %d events (cursor: %s)", len(resp.Events), c.nextCursor)
 	var events []collectors.Event
 	for _, evt := range resp.Events {
 		select {
@@ -99,13 +99,13 @@ func (c *Client) Fetch(ctx context.Context, opts collectors.FetchOptions) ([]col
 
 		detail, err := c.fetchEvent(ctx, evt.Ticker)
 		if err != nil {
-			log.Printf("[kalshi] skip event %s: %v", evt.Ticker, err)
+			logging.Errorf("[kalshi] skip event %s: %v", evt.Ticker, err)
 			continue
 		}
 
 		series, err := c.fetchSeries(ctx, evt.SeriesTicker)
 		if err != nil {
-			log.Printf("[kalshi] skip series %s for event %s: %v", evt.SeriesTicker, evt.Ticker, err)
+			logging.Errorf("[kalshi] skip series %s for event %s: %v", evt.SeriesTicker, evt.Ticker, err)
 			continue
 		}
 
@@ -114,7 +114,7 @@ func (c *Client) Fetch(ctx context.Context, opts collectors.FetchOptions) ([]col
 
 	c.nextCursor = resp.Cursor
 	if c.nextCursor == "" {
-		log.Printf("[kalshi] reached end of events, resetting cursor")
+		logging.Infof("[kalshi] reached end of events, resetting cursor")
 	}
 
 	return events, nil

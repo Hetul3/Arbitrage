@@ -50,6 +50,7 @@ services:
       - kafka-broker
     environment:
       GO111MODULE: "on"
+      LOG_LEVEL: "error"
       POLYMARKET_PAGE_SIZE: ${POLYMARKET_PAGE_SIZE:-50}
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
@@ -74,6 +75,7 @@ services:
       - kafka-broker
     environment:
       GO111MODULE: "on"
+      LOG_LEVEL: "error"
       KALSHI_PAGE_SIZE: ${KALSHI_PAGE_SIZE:-100}
       SQLITE_PATH: ${SQLITE_PATH:-/app/data/arb.db}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
@@ -99,6 +101,7 @@ services:
     command: [ "go", "run", "./cmd/polymarket_worker" ]
     environment:
       GO111MODULE: "on"
+      LOG_LEVEL: "error"
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       POLYMARKET_KAFKA_TOPIC: ${POLYMARKET_KAFKA_TOPIC:-polymarket.snapshots}
       POLYMARKET_WORKER_GROUP: ${POLYMARKET_WORKER_GROUP:-polymarket-workers}
@@ -144,6 +147,7 @@ services:
     command: [ "go", "run", "./cmd/kalshi_worker" ]
     environment:
       GO111MODULE: "on"
+      LOG_LEVEL: "error"
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       KALSHI_KAFKA_TOPIC: ${KALSHI_KAFKA_TOPIC:-kalshi.snapshots}
       KALSHI_WORKER_GROUP: ${KALSHI_WORKER_GROUP:-kalshi-workers}
@@ -188,6 +192,7 @@ services:
     command: [ "go", "run", "./cmd/arb_engine" ]
     environment:
       GO111MODULE: "on"
+      LOG_LEVEL: "error"
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       MATCHES_KAFKA_TOPIC: ${MATCHES_KAFKA_TOPIC:-matches.live}
       ARB_ENGINE_GROUP: ${ARB_ENGINE_GROUP:-arb-engine}
@@ -201,6 +206,7 @@ services:
     command: [ "go", "run", "./cmd/snapshot_worker" ]
     environment:
       GO111MODULE: "on"
+      LOG_LEVEL: "error"
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-broker:9092}
       MATCHES_KAFKA_TOPIC: ${MATCHES_KAFKA_TOPIC:-matches.live}
       SNAPSHOT_WORKER_GROUP: ${SNAPSHOT_WORKER_GROUP:-snapshot-worker}

@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"fmt"
 	"os"
 	"os/signal"
 	"strconv"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/hetulpatel/Arbitrage/internal/arb"
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
+	"github.com/hetulpatel/Arbitrage/internal/logging"
 	"github.com/hetulpatel/Arbitrage/internal/matches"
 	sqlstore "github.com/hetulpatel/Arbitrage/internal/storage/sqlite"
 )
@@ -19,6 +20,7 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	logging.InitFromEnv()
 
 	brokers := kafka.Brokers()
 	topic := kafka.TopicFromEnv("MATCHES_KAFKA_TOPIC", kafka.DefaultMatchTopic)
@@ -28,23 +30,23 @@ func main() {
 
 	waitCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	if err := kafka.WaitForBroker(waitCtx, brokers); err != nil {
-		log.Fatalf("[arb-engine] wait for broker: %v", err)
+		logging.Fatalf("[arb-engine] wait for broker: %v", err)
 	}
 	cancel()
 
 	ensureCtx, cancelEnsure := context.WithTimeout(ctx, 30*time.Second)
 	if err := kafka.EnsureTopic(ensureCtx, brokers, topic); err != nil {
-		log.Printf("[arb-engine] ensure topic warning: %v", err)
+		logging.Errorf("[arb-engine] ensure topic warning: %v", err)
 	}
 	cancelEnsure()
 
 	store, err := sqlstore.Open(os.Getenv("SQLITE_PATH"))
 	if err != nil {
-		log.Fatalf("[arb-engine] open sqlite: %v", err)
+		logging.Fatalf("[arb-engine] open sqlite: %v", err)
 	}
 	defer store.Close()
 
-	log.Printf("[arb-engine] consuming %s with group %s (%d workers, budget=%.2f)", topic, group, workerCount, budget)
+	logging.Infof("[arb-engine] consuming %s with group %s (%d workers, budget=%.2f)", topic, group, workerCount, budget)
 	runWorkers(ctx, brokers, topic, group, workerCount, budget, store)
 }
 
@@ -75,12 +77,12 @@ func consume(ctx context.Context, brokers []string, topic, group string, budget 
 			if ctx.Err() != nil {
 				return
 			}
-			log.Printf("[arb-engine] read error: %v", err)
+			logging.Errorf("[arb-engine] read error: %v", err)
 			continue
 		}
 		var payload matches.Payload
 		if err := json.Unmarshal(msg.Value, &payload); err != nil {
-			log.Printf("[arb-engine] unmarshal error: %v", err)
+			logging.Errorf("[arb-engine] unmarshal error: %v", err)
 			continue
 		}
 		result := arb.Evaluate(&payload, cfg)
@@ -89,7 +91,7 @@ func consume(ctx context.Context, brokers []string, topic, group string, budget 
 		}
 		logOpportunity(&payload, result)
 		if err := store.InsertArbOpportunity(ctx, &payload, result); err != nil {
-			log.Printf("[arb-engine] sqlite error: %v", err)
+			logging.Errorf("[arb-engine] sqlite error: %v", err)
 		}
 	}
 }
@@ -101,15 +103,16 @@ func logOpportunity(payload *matches.Payload, result arb.Result) {
 	}
 
 	if result.Untradable {
-		log.Printf("[arb-engine] pair=%s UNTRADABLE reason=%s", pairID, result.Reason)
+		logging.Errorf("[arb-engine] pair=%s UNTRADABLE reason=%s", pairID, result.Reason)
 		return
 	}
 
 	if result.Best == nil || result.Best.Quantity <= 0 {
-		log.Printf("[arb-engine] pair=%s no opportunity found", pairID)
+		logging.Infof("[arb-engine] pair=%s no opportunity found", pairID)
 		return
 	}
-	log.Printf("[arb-engine] pair=%s dir=%s qty=%.2f cost=%.4f profit=%.4f fees=%.4f", pairID, result.Best.Direction, result.Best.Quantity, result.Best.TotalCostUSD, result.Best.ProfitUSD, result.Best.KalshiFeesUSD+result.Best.PolymarketFeesUSD)
+	fmt.Printf("[arb-opportunity] pair=%s dir=%s qty=%.2f cost=%.4f profit=%.4f fees=%.4f\n",
+		pairID, result.Best.Direction, result.Best.Quantity, result.Best.TotalCostUSD, result.Best.ProfitUSD, result.Best.KalshiFeesUSD+result.Best.PolymarketFeesUSD)
 }
 
 func envInt(key string, def int) int {
