@@ -20,6 +20,8 @@ type Payload struct {
 	Target            models.MarketSnapshot `json:"target"`
 	Arbitrage         *Opportunity          `json:"arbitrage,omitempty"`
 	ResolutionVerdict *ResolutionVerdict    `json:"resolution_verdict,omitempty"`
+	Fresh             *FreshSnapshots       `json:"fresh,omitempty"`
+	FinalOpportunity  *Opportunity          `json:"final_opportunity,omitempty"`
 }
 
 const payloadVersion = 1

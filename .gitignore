@@ -9,3 +9,4 @@ data/*.db-shm
 data/chroma/
 matches.log
 validator.log
+final_arb.log

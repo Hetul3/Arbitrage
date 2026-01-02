@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hetulpatel/Arbitrage/internal/collectors"
+	"github.com/hetulpatel/Arbitrage/internal/models"
 )
 
 const (
@@ -163,6 +164,34 @@ func (c *Client) fetchSeries(ctx context.Context, ticker string) (*seriesRespons
 		return nil, err
 	}
 	return &out, nil
+}
+
+// MarketSnapshot fetches and normalizes a single Kalshi market for fresh orderbooks.
+func (c *Client) MarketSnapshot(ctx context.Context, eventTicker, marketTicker, seriesTicker string) (*models.MarketSnapshot, error) {
+	if eventTicker == "" || marketTicker == "" {
+		return nil, fmt.Errorf("kalshi: event ticker and market ticker required")
+	}
+	detail, err := c.fetchEvent(ctx, eventTicker)
+	if err != nil {
+		return nil, fmt.Errorf("kalshi fetch event %s: %w", eventTicker, err)
+	}
+	var series *seriesResponse
+	if seriesTicker != "" {
+		series, err = c.fetchSeries(ctx, seriesTicker)
+	} else {
+		series, err = c.fetchSeries(ctx, detail.Event.SeriesTicker)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("kalshi fetch series: %w", err)
+	}
+	normEvent := c.normalizeEvent(ctx, detail, series)
+	for _, m := range normEvent.Markets {
+		if m.MarketID == marketTicker {
+			snap := models.NewSnapshot(collectors.VenueKalshi, normEvent, m, time.Now().UTC())
+			return &snap, nil
+		}
+	}
+	return nil, fmt.Errorf("kalshi: market %s not found in event %s", marketTicker, eventTicker)
 }
 
 func (c *Client) fetchOrderbooks(ctx context.Context, ticker string) (map[string]collectors.Orderbook, error) {

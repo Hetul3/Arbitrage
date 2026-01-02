@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -13,8 +14,11 @@ import (
 	"github.com/hetulpatel/Arbitrage/internal/arb"
 	"github.com/hetulpatel/Arbitrage/internal/collectors"
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
+	"github.com/hetulpatel/Arbitrage/internal/kalshi"
 	"github.com/hetulpatel/Arbitrage/internal/llm"
 	"github.com/hetulpatel/Arbitrage/internal/matches"
+	"github.com/hetulpatel/Arbitrage/internal/models"
+	"github.com/hetulpatel/Arbitrage/internal/polymarket"
 	"github.com/hetulpatel/Arbitrage/internal/validator"
 )
 
@@ -40,16 +44,30 @@ func main() {
 
 	llmClient := mustLLMClient()
 	valSvc := mustValidatorService(llmClient)
+	pmClient := mustPolymarketClient()
+	kxClient := mustKalshiClient()
 
 	log.Printf("[snapshot-worker] consuming %s with group %s (%d workers, budget=%.2f)", topic, group, workerCount, budget)
-	runWorkers(ctx, brokers, topic, group, workerCount, budget, valSvc)
+	runWorkers(ctx, brokers, topic, group, workerCount, budget, workerDeps{
+		validator:   valSvc,
+		pmClient:    pmClient,
+		kxClient:    kxClient,
+		finalBudget: budget,
+	})
 }
 
-func runWorkers(ctx context.Context, brokers []string, topic, group string, workerCount int, budget float64, validatorSvc *validator.Service) {
+type workerDeps struct {
+	validator   *validator.Service
+	pmClient    *polymarket.Client
+	kxClient    *kalshi.Client
+	finalBudget float64
+}
+
+func runWorkers(ctx context.Context, brokers []string, topic, group string, workerCount int, budget float64, deps workerDeps) {
 	if workerCount <= 0 {
 		workerCount = 1
 	}
-	if validatorSvc == nil {
+	if deps.validator == nil {
 		log.Printf("[snapshot-worker] validator not configured; exiting")
 		return
 	}
@@ -58,20 +76,22 @@ func runWorkers(ctx context.Context, brokers []string, topic, group string, work
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			consume(ctx, brokers, topic, group, budget, validatorSvc)
+			consume(ctx, brokers, topic, group, budget, deps)
 		}(i)
 	}
 	<-ctx.Done()
 	wg.Wait()
 }
 
-func consume(ctx context.Context, brokers []string, topic, group string, budget float64, validatorSvc *validator.Service) {
+func consume(ctx context.Context, brokers []string, topic, group string, budget float64, deps workerDeps) {
 	reader := kafka.NewReader(brokers, topic, group)
 	defer reader.Close()
 
+	forceFirst := envBool("SNAPSHOT_WORKER_FORCE_VALIDATION", false)
+	bypassLLM := envBool("SNAPSHOT_WORKER_BYPASS_LLM", false)
 	cfg := arb.Config{
 		BudgetUSD:    budget,
-		ForceVerdict: envBool("SNAPSHOT_WORKER_FORCE_VALIDATION", false),
+		ForceVerdict: forceFirst,
 	}
 	for {
 		msg, err := reader.ReadMessage(ctx)
@@ -101,14 +121,26 @@ func consume(ctx context.Context, brokers []string, topic, group string, budget 
 
 		payload.Arbitrage = result.Best
 
-		verdict, err := validatorSvc.Validate(ctx, &payload)
-		if err != nil {
-			log.Printf("[snapshot-worker] validator error pair=%s: %v", payload.PairID, err)
-			continue
+		var verdict *matches.ResolutionVerdict
+		if bypassLLM {
+			verdict = matches.NewResolutionVerdict(true, "bypassed via SNAPSHOT_WORKER_BYPASS_LLM")
+		} else {
+			res, err := deps.validator.Validate(ctx, &payload)
+			if err != nil {
+				log.Printf("[snapshot-worker] validator error pair=%s: %v", payload.PairID, err)
+				continue
+			}
+			verdict = matches.NewResolutionVerdict(res.ValidResolution, res.ResolutionReason)
 		}
-		payload.ResolutionVerdict = matches.NewResolutionVerdict(verdict.ValidResolution, verdict.ResolutionReason)
+
+		payload.ResolutionVerdict = verdict
 		logLLMResult(&payload)
 		appendValidationLog(&payload)
+		if verdict.ValidResolution {
+			if err := deps.runFinalStage(ctx, &payload); err != nil {
+				log.Printf("[snapshot-worker] final stage error pair=%s: %v", payload.PairID, err)
+			}
+		}
 	}
 }
 
@@ -141,6 +173,19 @@ func questionForVenue(payload *matches.Payload, venue collectors.Venue) string {
 	return ""
 }
 
+func snapshotForVenue(payload *matches.Payload, venue collectors.Venue) *models.MarketSnapshot {
+	if payload == nil {
+		return nil
+	}
+	if payload.Source.Venue == venue {
+		return &payload.Source
+	}
+	if payload.Target.Venue == venue {
+		return &payload.Target
+	}
+	return nil
+}
+
 func appendValidationLog(payload *matches.Payload) {
 	if payload == nil {
 		return
@@ -163,6 +208,56 @@ func appendValidationLog(payload *matches.Payload) {
 	if _, err := f.Write(append(data, '\n')); err != nil {
 		log.Printf("[snapshot-worker] validator log write error: %v", err)
 	}
+}
+
+func (d workerDeps) runFinalStage(parentCtx context.Context, payload *matches.Payload) error {
+	if payload == nil {
+		return fmt.Errorf("nil payload")
+	}
+	if d.pmClient == nil || d.kxClient == nil {
+		return fmt.Errorf("refresh clients not configured")
+	}
+	pmSnap := snapshotForVenue(payload, collectors.VenuePolymarket)
+	kxSnap := snapshotForVenue(payload, collectors.VenueKalshi)
+	if pmSnap == nil || kxSnap == nil {
+		return fmt.Errorf("missing source snapshots")
+	}
+
+	timeout := time.Duration(envInt("FRESH_FETCH_TIMEOUT_SECONDS", 15)) * time.Second
+	ctx, cancel := context.WithTimeout(parentCtx, timeout)
+	defer cancel()
+
+	freshPM, err := d.pmClient.MarketSnapshot(ctx, pmSnap.Event.EventID, pmSnap.Market.MarketID)
+	if err != nil {
+		return fmt.Errorf("refresh polymarket: %w", err)
+	}
+	freshKX, err := d.kxClient.MarketSnapshot(ctx, kxSnap.Event.EventID, kxSnap.Market.MarketID, "")
+	if err != nil {
+		return fmt.Errorf("refresh kalshi: %w", err)
+	}
+
+	payload.Fresh = &matches.FreshSnapshots{
+		Polymarket: freshPM,
+		Kalshi:     freshKX,
+	}
+
+	freshPayload := matches.Payload{
+		PairID:    payload.PairID,
+		Source:    *freshPM,
+		Target:    *freshKX,
+		MatchedAt: time.Now().UTC(),
+	}
+	result := arb.Evaluate(&freshPayload, arb.Config{BudgetUSD: d.finalBudget})
+	payload.FinalOpportunity = result.Best
+
+	if result.Best == nil {
+		log.Printf("[snapshot-worker] pair=%s final arb found no profitable direction", payload.PairID)
+		appendFinalLog(payload)
+		return nil
+	}
+	log.Printf("[snapshot-worker] pair=%s final arb dir=%s qty=%.2f profit=%.4f", payload.PairID, result.Best.Direction, result.Best.Quantity, result.Best.ProfitUSD)
+	appendFinalLog(payload)
+	return nil
 }
 
 func mustLLMClient() *llm.Client {
@@ -192,6 +287,49 @@ func mustValidatorService(llmClient *llm.Client) *validator.Service {
 		log.Fatalf("[snapshot-worker] validator init: %v", err)
 	}
 	return svc
+}
+
+func mustPolymarketClient() *polymarket.Client {
+	cfg := polymarket.Config{
+		BaseURL: envString("POLYMARKET_API_URL", ""),
+		BookURL: envString("POLYMARKET_BOOK_URL", ""),
+		Timeout: time.Duration(envInt("POLYMARKET_HTTP_TIMEOUT_SECONDS", 20)) * time.Second,
+	}
+	return polymarket.NewClient(cfg)
+}
+
+func mustKalshiClient() *kalshi.Client {
+	cfg := kalshi.Config{
+		BaseURL:   envString("KALSHI_API_URL", ""),
+		SeriesURL: envString("KALSHI_SERIES_URL", ""),
+		BookURL:   envString("KALSHI_MARKET_URL", ""),
+		Timeout:   time.Duration(envInt("KALSHI_HTTP_TIMEOUT_SECONDS", 20)) * time.Second,
+	}
+	return kalshi.NewClient(cfg)
+}
+
+func appendFinalLog(payload *matches.Payload) {
+	if payload == nil {
+		return
+	}
+	entry := map[string]any{
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"payload":   payload,
+	}
+	data, err := json.MarshalIndent(entry, "", "  ")
+	if err != nil {
+		log.Printf("[snapshot-worker] final log marshal error: %v", err)
+		return
+	}
+	f, err := os.OpenFile("final_arb.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		log.Printf("[snapshot-worker] final log open error: %v", err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		log.Printf("[snapshot-worker] final log write error: %v", err)
+	}
 }
 
 func envInt(key string, def int) int {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hetulpatel/Arbitrage/internal/collectors"
+	"github.com/hetulpatel/Arbitrage/internal/models"
 )
 
 const (
@@ -146,6 +147,25 @@ func (c *Client) fetchEvent(ctx context.Context, id string) (*eventDetail, error
 		return nil, err
 	}
 	return &ev, nil
+}
+
+// MarketSnapshot fetches and normalizes a single market for fresh orderbook checks.
+func (c *Client) MarketSnapshot(ctx context.Context, eventID, marketID string) (*models.MarketSnapshot, error) {
+	if eventID == "" || marketID == "" {
+		return nil, fmt.Errorf("polymarket: eventID and marketID are required")
+	}
+	ev, err := c.fetchEvent(ctx, eventID)
+	if err != nil {
+		return nil, fmt.Errorf("polymarket fetch event %s: %w", eventID, err)
+	}
+	normEvent := c.normalizeEvent(ctx, ev)
+	for _, m := range normEvent.Markets {
+		if m.MarketID == marketID {
+			snap := models.NewSnapshot(collectors.VenuePolymarket, normEvent, m, time.Now().UTC())
+			return &snap, nil
+		}
+	}
+	return nil, fmt.Errorf("polymarket: market %s not found in event %s", marketID, eventID)
 }
 
 func (c *Client) fetchOrderbook(ctx context.Context, tokenID string) (collectors.Orderbook, error) {
