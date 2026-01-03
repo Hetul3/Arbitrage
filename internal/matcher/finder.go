@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hetulpatel/Arbitrage/internal/cache"
 	"github.com/hetulpatel/Arbitrage/internal/chroma"
 	"github.com/hetulpatel/Arbitrage/internal/collectors"
 	"github.com/hetulpatel/Arbitrage/internal/logging"
+	"github.com/hetulpatel/Arbitrage/internal/matches"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 )
 
@@ -19,6 +21,7 @@ type Config struct {
 	Threshold    float64
 	Freshness    time.Duration
 	Debug        bool
+	VerdictCache cache.VerdictCache
 }
 
 type Finder struct {
@@ -28,12 +31,14 @@ type Finder struct {
 	threshold    float64
 	freshness    time.Duration
 	debug        bool
+	verdictCache cache.VerdictCache
 }
 
 type Result struct {
-	Target     *models.MarketSnapshot
-	Similarity float64
-	Distance   float64
+	Target        *models.MarketSnapshot
+	Similarity    float64
+	Distance      float64
+	CachedVerdict bool
 }
 
 func NewFinder(cfg Config) (*Finder, error) {
@@ -62,6 +67,7 @@ func NewFinder(cfg Config) (*Finder, error) {
 		threshold:    threshold,
 		freshness:    freshness,
 		debug:        cfg.Debug,
+		verdictCache: cfg.VerdictCache,
 	}, nil
 }
 
@@ -154,6 +160,13 @@ func (f *Finder) FindBestMatch(ctx context.Context, snap *models.MarketSnapshot,
 				"captured_at", target.CapturedAt,
 			)
 		}
+		if result, skip := f.checkVerdictCache(ctx, snap, &target, similarity, dist); skip {
+			if result != nil {
+				return result, nil
+			}
+			continue
+		}
+
 		return &Result{
 			Target:     &target,
 			Similarity: similarity,
@@ -172,6 +185,38 @@ func (f *Finder) FindBestMatch(ctx context.Context, snap *models.MarketSnapshot,
 
 func (f *Finder) Threshold() float64 {
 	return f.threshold
+}
+
+func (f *Finder) checkVerdictCache(ctx context.Context, source, target *models.MarketSnapshot, similarity, distance float64) (*Result, bool) {
+	if f.verdictCache == nil {
+		return nil, false
+	}
+	key := matches.VerdictCacheKey(source, target)
+	if key == "" {
+		return nil, false
+	}
+	verdict, ok, err := f.verdictCache.Get(ctx, key)
+	if err != nil {
+		logging.Errorf("[verdict-cache] get error key=%s: %v", key, err)
+		return nil, false
+	}
+	if !ok {
+		logging.Infof("[verdict-cache] miss key=%s", key)
+		return nil, false
+	}
+
+	if verdict {
+		logging.Infof("[verdict-cache] hit SAFE key=%s similarity=%.4f", key, similarity)
+		return &Result{
+			Target:        target,
+			Similarity:    similarity,
+			Distance:      distance,
+			CachedVerdict: true,
+		}, true
+	}
+
+	logging.Infof("[verdict-cache] hit UNSAFE key=%s similarity=%.4f", key, similarity)
+	return nil, true
 }
 
 func oppositeVenue(v collectors.Venue) (collectors.Venue, error) {

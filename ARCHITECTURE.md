@@ -33,12 +33,12 @@ Collectors -> Kafka (snapshots) -> Snapshot Worker
    - Normalized snapshot includes IDs, text fields, resolution info, close time, tick size, token/orderbook IDs, best bid/ask, and any batch orderbook summary collected inline.
 
 2. **Kafka Workers (current implementation)**
-   - Venue-specific workers consume the snapshot topics, build an embedding string (`event_title`, `question`, settle date, trimmed description + subtitle), call Nebius, and upsert vectors + metadata (venue, IDs, `captured_at`, `captured_at_unix`, `close_time`, `text_hash`, `resolution_hash`) into Chroma. No Redis cache yet—every snapshot is embedded on the fly.
+   - Venue-specific workers consume the snapshot topics, build an embedding string (`event_title`, `question`, settle date, trimmed description + subtitle), call Nebius, and upsert vectors + metadata (venue, IDs, `captured_at`, `captured_at_unix`, `close_time`, `text_hash`, `resolution_hash`) into Chroma. Embeddings are cached in Redis (`emb:<venue>:<market_id>:<text_hash>`) so replays skip redundant calls.
    - Each Chroma entry uses the deterministic ID `venue:market_id` (so new snapshots overwrite the same vector) and stores the full `MarketSnapshot` JSON in the `document` field for later re-use.
 
 3. **Snapshot Worker**
    - Current implementation consumes `matches.live`, runs the taker-only arb pre-check with the captured orderbooks, and **only** forwards profitable + tradable pairs into the Nebius LLM validator (GPT-OSS 120B, temperature 0). The validator receives a structured JSON blob (both venues’ questions, rules text, settlement sources, cutoff times, Kalshi contract PDF excerpt) and returns `{ValidResolution, ResolutionReason}`; the worker logs the verdict for each pair. After a SAFE verdict, the worker refetches live orderbooks, attaches them under a new `fresh` section on the payload, and runs a final arb evaluation against those snapshots. Cached SAFE pairs (once Redis is wired in) will skip the first arb+LLM stage, reuse the cached verdict, populate `fresh`, and go directly into the final arb engine.
-   - Next iterations will ensure an embedding exists via Redis cache (`emb:<platform>:<market_id>:<text_hash>`). Misses call Nebius embeddings, store result in Redis (multi-day TTL), and immediately upsert to Chroma.
+   - Next iterations will ensure an embedding exists via Redis cache (`emb:<platform>:<market_id>:<text_hash>`). Misses call Nebius embeddings, store result in Redis (multi-day TTL), and immediately upsert to Chroma. Verdicts are also cached (`pair_verdict:<sorted venue:id:text_hash|...>`) so SAFE pairs can skip the LLM when neither side’s resolution text has changed.
    - Will query Chroma for opposite-venue markets: topK=3 within last-hour freshness, cosine similarity ≥ threshold (currently 0.95), and optional category match.
    - For each candidate result:
      - Construct a `pair_id` (e.g., `sha256("poly:<id>|kalshi:<id>")`).
@@ -180,6 +180,7 @@ The arb engine consumes this topic, simulates both legs with slippage + fees, an
 | Key | Purpose | TTL |
 | --- | --- | --- |
 | `emb:<platform>:<market_id>:<text_hash>` | Cached Nebius embedding for title+description. | ≥10 days (RDB snapshot). |
+| `pair_verdict:<venue:id:text_hash>|<venue:id:text_hash>` | Cached SAFE/UNSAFE LLM verdict for a pair. | ≥10 days |
 | `pair_bundle:<poly_id>:<kalshi_id>:<poly_hash>:<kalshi_hash>` | Stores `{verdict, last_profit_usd, edge_bps, max_size, updated_at}` for combined match/LLM result. | Long TTL (days) with LRU eviction acceptable. |
 | `pair_inflight:<pair_id>` | Short lock to prevent duplicate processing. | ~60 seconds. |
 
@@ -202,10 +203,10 @@ Used as a warehouse; runtime logic never depends on these tables.
 - Embeddings: Nebius OpenAI-compatible model, focusing on title + description (and optional resolution description if it adds clarity). Resolution sources are **not** included to avoid punishing otherwise equivalent markets.
 - Matching: topK=3; threshold 0.95 cosine similarity. Deterministic filters on timing, numeric thresholds, etc. Additional pairs can be tested if the top result was previously rejected.
 - LLM validation (Nebius) triggers only when there is no cached verdict for the current resolution hashes. Prompt includes both market descriptions, resolution text, and Kalshi settlement sources/contract_terms references. Outputs SAFE/UNSAFE.
-- **TODO:** once Redis + LLM verdict caching is wired in, the matcher must walk
-  the sorted candidates and consult the cache: skip hits previously marked
-  UNSAFE, fast-path SAFE verdicts straight into the arb stage, and only fall
-  back to the LLM when no cached verdict exists for the current hash pair.
+- The matcher walks up to the top 3 candidates from Chroma. For each candidate
+  it checks Redis: cached UNSAFE verdicts are skipped (try the next candidate),
+  cached SAFE verdicts are re-published immediately, and only uncached pairs
+  hit the LLM.
 
 ## Fees & Slippage
 

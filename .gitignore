@@ -12,3 +12,4 @@ data/redis/
 matches.log
 validator.log
 final_arb.log
+agents.md

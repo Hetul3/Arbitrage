@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hetulpatel/Arbitrage/internal/arb"
+	"github.com/hetulpatel/Arbitrage/internal/cache"
 	"github.com/hetulpatel/Arbitrage/internal/collectors"
 	"github.com/hetulpatel/Arbitrage/internal/kafka"
 	"github.com/hetulpatel/Arbitrage/internal/kalshi"
@@ -19,6 +20,7 @@ import (
 	"github.com/hetulpatel/Arbitrage/internal/matches"
 	"github.com/hetulpatel/Arbitrage/internal/models"
 	"github.com/hetulpatel/Arbitrage/internal/polymarket"
+	sqlstore "github.com/hetulpatel/Arbitrage/internal/storage/sqlite"
 	"github.com/hetulpatel/Arbitrage/internal/validator"
 )
 
@@ -47,21 +49,32 @@ func main() {
 	valSvc := mustValidatorService(llmClient)
 	pmClient := mustPolymarketClient()
 	kxClient := mustKalshiClient()
+	verdictCache := mustVerdictCache()
+	if verdictCache != nil {
+		defer verdictCache.Close()
+	}
+
+	store := mustSQLiteStore()
+	defer store.Close()
 
 	logging.Infof("[snapshot-worker] consuming %s with group %s (%d workers, budget=%.2f)", topic, group, workerCount, budget)
 	runWorkers(ctx, brokers, topic, group, workerCount, budget, workerDeps{
-		validator:   valSvc,
-		pmClient:    pmClient,
-		kxClient:    kxClient,
-		finalBudget: budget,
+		validator:    valSvc,
+		pmClient:     pmClient,
+		kxClient:     kxClient,
+		finalBudget:  budget,
+		verdictCache: verdictCache,
+		store:        store,
 	})
 }
 
 type workerDeps struct {
-	validator   *validator.Service
-	pmClient    *polymarket.Client
-	kxClient    *kalshi.Client
-	finalBudget float64
+	validator    *validator.Service
+	pmClient     *polymarket.Client
+	kxClient     *kalshi.Client
+	finalBudget  float64
+	verdictCache cache.VerdictCache
+	store        *sqlstore.Store
 }
 
 func runWorkers(ctx context.Context, brokers []string, topic, group string, workerCount int, budget float64, deps workerDeps) {
@@ -110,6 +123,16 @@ func consume(ctx context.Context, brokers []string, topic, group string, budget 
 			continue
 		}
 
+		if payload.CachedVerdict && payload.ResolutionVerdict != nil && payload.ResolutionVerdict.ValidResolution {
+			logging.Infof("[snapshot-worker] pair=%s using cached SAFE verdict", payload.PairID)
+			logLLMResult(&payload)
+			appendValidationLog(&payload)
+			if err := deps.runFinalStage(ctx, &payload); err != nil {
+				logging.Errorf("[snapshot-worker] final stage error pair=%s: %v", payload.PairID, err)
+			}
+			continue
+		}
+
 		result := arb.Evaluate(&payload, cfg)
 		if result.Untradable {
 			logging.Infof("[snapshot-worker] pair=%s skipped (untradable: %s)", payload.PairID, result.Reason)
@@ -121,6 +144,17 @@ func consume(ctx context.Context, brokers []string, topic, group string, budget 
 		}
 
 		payload.Arbitrage = result.Best
+
+		verdictKey := matches.VerdictCacheKey(&payload.Source, &payload.Target)
+		if payload.CachedVerdict && payload.ResolutionVerdict != nil && payload.ResolutionVerdict.ValidResolution {
+			logging.Infof("[snapshot-worker] pair=%s using cached SAFE verdict", payload.PairID)
+			logLLMResult(&payload)
+			appendValidationLog(&payload)
+			if err := deps.runFinalStage(ctx, &payload); err != nil {
+				logging.Errorf("[snapshot-worker] final stage error pair=%s: %v", payload.PairID, err)
+			}
+			continue
+		}
 
 		var verdict *matches.ResolutionVerdict
 		if bypassLLM {
@@ -137,6 +171,14 @@ func consume(ctx context.Context, brokers []string, topic, group string, budget 
 		payload.ResolutionVerdict = verdict
 		logLLMResult(&payload)
 		appendValidationLog(&payload)
+		if deps.verdictCache != nil && verdictKey != "" {
+			if err := deps.verdictCache.Set(ctx, verdictKey, verdict.ValidResolution); err != nil {
+				logging.Errorf("[verdict-cache] set error key=%s: %v", verdictKey, err)
+			} else {
+				logging.Infof("[verdict-cache] stored key=%s valid=%t", verdictKey, verdict.ValidResolution)
+			}
+		}
+
 		if verdict.ValidResolution {
 			if err := deps.runFinalStage(ctx, &payload); err != nil {
 				logging.Errorf("[snapshot-worker] final stage error pair=%s: %v", payload.PairID, err)
@@ -251,6 +293,12 @@ func (d workerDeps) runFinalStage(parentCtx context.Context, payload *matches.Pa
 	result := arb.Evaluate(&freshPayload, arb.Config{BudgetUSD: d.finalBudget})
 	payload.FinalOpportunity = result.Best
 
+	if result.Best != nil {
+		if err := d.store.InsertArbOpportunity(parentCtx, payload, result); err != nil {
+			logging.Errorf("[snapshot-worker] sqlite insert error pair=%s: %v", payload.PairID, err)
+		}
+	}
+
 	if result.Best == nil {
 		fmt.Printf("[snapshot-worker] final pair=%s no profitable direction after refresh\n", payload.PairID)
 		appendFinalLog(payload)
@@ -288,6 +336,20 @@ func mustValidatorService(llmClient *llm.Client) *validator.Service {
 		logging.Fatalf("[snapshot-worker] validator init: %v", err)
 	}
 	return svc
+}
+
+func mustVerdictCache() cache.VerdictCache {
+	addr := envString("REDIS_ADDR", "redis:6379")
+	if addr == "" {
+		return nil
+	}
+	db := envInt("REDIS_DB", 0)
+	ttlHours := envInt("REDIS_EMBED_TTL_HOURS", 240)
+	cacheClient, err := cache.NewRedisVerdictCache(addr, os.Getenv("REDIS_PASSWORD"), db, time.Duration(ttlHours)*time.Hour, "pair_verdict")
+	if err != nil {
+		logging.Fatalf("[snapshot-worker] redis verdict cache: %v", err)
+	}
+	return cacheClient
 }
 
 func mustPolymarketClient() *polymarket.Client {
@@ -365,4 +427,16 @@ func envBool(key string, def bool) bool {
 		}
 	}
 	return def
+}
+
+func mustSQLiteStore() *sqlstore.Store {
+	path := os.Getenv("SQLITE_PATH")
+	if path == "" {
+		path = "data/arb.db"
+	}
+	store, err := sqlstore.Open(path)
+	if err != nil {
+		logging.Fatalf("[snapshot-worker] sqlite open: %v", err)
+	}
+	return store
 }

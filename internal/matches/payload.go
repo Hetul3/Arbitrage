@@ -22,6 +22,7 @@ type Payload struct {
 	ResolutionVerdict *ResolutionVerdict    `json:"resolution_verdict,omitempty"`
 	Fresh             *FreshSnapshots       `json:"fresh,omitempty"`
 	FinalOpportunity  *Opportunity          `json:"final_opportunity,omitempty"`
+	CachedVerdict     bool                  `json:"cached_verdict,omitempty"`
 }
 
 const payloadVersion = 1

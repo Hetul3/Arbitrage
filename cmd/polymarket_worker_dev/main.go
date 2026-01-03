@@ -47,14 +47,18 @@ func main() {
 	embedClient := mustEmbedClient()
 	chromaClient, collectionID := mustChromaClient(ctx)
 	embedCache := mustEmbeddingCache()
+	verdictCache := mustVerdictCache()
 	defer func() {
 		if embedCache != nil {
 			embedCache.Close()
 		}
+		if verdictCache != nil {
+			verdictCache.Close()
+		}
 	}()
 	logCache := envBool("REDIS_EMBED_LOG_HITS", false)
 	processor := workers.NewProcessor(embedClient, chromaClient, collectionID, "polymarket", embedCache, logCache)
-	finder := mustFinder(chromaClient, collectionID, envBool("MATCH_DEBUG", false))
+	finder := mustFinder(chromaClient, collectionID, envBool("MATCH_DEBUG", false), verdictCache)
 	matchWriter := setupMatchWriter(ctx, brokers)
 	defer func() {
 		if matchWriter != nil {
@@ -121,7 +125,7 @@ func mustChromaClient(ctx context.Context) (*chroma.Client, string) {
 	return client, collection.ID
 }
 
-func mustFinder(client *chroma.Client, collectionID string, debug bool) *matcher.Finder {
+func mustFinder(client *chroma.Client, collectionID string, debug bool, verdictCache cache.VerdictCache) *matcher.Finder {
 	cfg := matcher.Config{
 		Client:       client,
 		CollectionID: collectionID,
@@ -129,6 +133,7 @@ func mustFinder(client *chroma.Client, collectionID string, debug bool) *matcher
 		Threshold:    envFloat("MATCH_SIMILARITY_THRESHOLD", 0.95),
 		Freshness:    time.Duration(envInt("MATCH_FRESH_WINDOW_SECONDS", 600)) * time.Second,
 		Debug:        debug,
+		VerdictCache: verdictCache,
 	}
 	finder, err := matcher.NewFinder(cfg)
 	if err != nil {
@@ -176,6 +181,20 @@ func mustEmbeddingCache() cache.EmbeddingCache {
 	return cacheClient
 }
 
+func mustVerdictCache() cache.VerdictCache {
+	addr := envString("REDIS_ADDR", "redis:6379")
+	if addr == "" {
+		return nil
+	}
+	db := envInt("REDIS_DB", 0)
+	ttlHours := envInt("REDIS_EMBED_TTL_HOURS", 240)
+	cacheClient, err := cache.NewRedisVerdictCache(addr, os.Getenv("REDIS_PASSWORD"), db, time.Duration(ttlHours)*time.Hour, "pair_verdict")
+	if err != nil {
+		log.Fatalf("[polymarket-worker-dev] redis verdict cache: %v", err)
+	}
+	return cacheClient
+}
+
 func envFloat(key string, def float64) float64 {
 	if val := os.Getenv(key); val != "" {
 		if parsed, err := strconv.ParseFloat(val, 64); err == nil {
@@ -205,6 +224,10 @@ func publishMatch(ctx context.Context, writer *kafkago.Writer, source *models.Ma
 	sourceCopy := *source
 	targetCopy := *res.Target
 	payload := matches.NewPayload(sourceCopy, targetCopy, res.Similarity, res.Distance)
+	if res.CachedVerdict {
+		payload.CachedVerdict = true
+		payload.ResolutionVerdict = matches.NewResolutionVerdict(true, "cached SAFE verdict")
+	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("[polymarket-worker-dev] marshal match error: %v", err)
