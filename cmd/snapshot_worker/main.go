@@ -53,28 +53,33 @@ func main() {
 	if verdictCache != nil {
 		defer verdictCache.Close()
 	}
-
+	opportunityCache := mustOpportunityCache()
+	if opportunityCache != nil {
+		defer opportunityCache.Close()
+	}
 	store := mustSQLiteStore()
 	defer store.Close()
 
 	logging.Infof("[snapshot-worker] consuming %s with group %s (%d workers, budget=%.2f)", topic, group, workerCount, budget)
 	runWorkers(ctx, brokers, topic, group, workerCount, budget, workerDeps{
-		validator:    valSvc,
-		pmClient:     pmClient,
-		kxClient:     kxClient,
-		finalBudget:  budget,
-		verdictCache: verdictCache,
-		store:        store,
+		validator:        valSvc,
+		pmClient:         pmClient,
+		kxClient:         kxClient,
+		finalBudget:      budget,
+		verdictCache:     verdictCache,
+		opportunityCache: opportunityCache,
+		store:            store,
 	})
 }
 
 type workerDeps struct {
-	validator    *validator.Service
-	pmClient     *polymarket.Client
-	kxClient     *kalshi.Client
-	finalBudget  float64
-	verdictCache cache.VerdictCache
-	store        *sqlstore.Store
+	validator        *validator.Service
+	pmClient         *polymarket.Client
+	kxClient         *kalshi.Client
+	finalBudget      float64
+	verdictCache     cache.VerdictCache
+	opportunityCache cache.OpportunityCache
+	store            *sqlstore.Store
 }
 
 func runWorkers(ctx context.Context, brokers []string, topic, group string, workerCount int, budget float64, deps workerDeps) {
@@ -293,17 +298,35 @@ func (d workerDeps) runFinalStage(parentCtx context.Context, payload *matches.Pa
 	result := arb.Evaluate(&freshPayload, arb.Config{BudgetUSD: d.finalBudget})
 	payload.FinalOpportunity = result.Best
 
-	if result.Best != nil {
-		if err := d.store.InsertArbOpportunity(parentCtx, payload, result); err != nil {
-			logging.Errorf("[snapshot-worker] sqlite insert error pair=%s: %v", payload.PairID, err)
-		}
-	}
-
 	if result.Best == nil {
 		fmt.Printf("[snapshot-worker] final pair=%s no profitable direction after refresh\n", payload.PairID)
 		appendFinalLog(payload)
 		return nil
 	}
+
+	emitOpportunity := true
+	var prevRecord *cache.OpportunityRecord
+	if d.opportunityCache != nil {
+		allowed, prev, err := d.shouldEmitOpportunity(parentCtx, payload.PairID, result.Best)
+		if err != nil {
+			logging.Errorf("[snapshot-worker] opportunity cache pair=%s: %v", payload.PairID, err)
+		}
+		emitOpportunity = allowed
+		prevRecord = prev
+	}
+	if !emitOpportunity {
+		prevProfit := 0.0
+		if prevRecord != nil {
+			prevProfit = prevRecord.ProfitUSD
+		}
+		logging.Infof("[snapshot-worker] pair=%s suppressed duplicate opportunity profit_new=%.4f profit_previous=%.4f", payload.PairID, result.Best.ProfitUSD, prevProfit)
+		return nil
+	}
+
+	if err := d.store.InsertArbOpportunity(parentCtx, payload, result); err != nil {
+		logging.Errorf("[snapshot-worker] sqlite insert error pair=%s: %v", payload.PairID, err)
+	}
+
 	fmt.Printf("[snapshot-worker] final pair=%s dir=%s qty=%.2f profit=%.4f\n", payload.PairID, result.Best.Direction, result.Best.Quantity, result.Best.ProfitUSD)
 	appendFinalLog(payload)
 	return nil
@@ -352,6 +375,20 @@ func mustVerdictCache() cache.VerdictCache {
 	return cacheClient
 }
 
+func mustOpportunityCache() cache.OpportunityCache {
+	addr := envString("REDIS_ADDR", "redis:6379")
+	if addr == "" {
+		return nil
+	}
+	db := envInt("REDIS_DB", 0)
+	ttlHours := envInt("OPPORTUNITY_CACHE_TTL_HOURS", 72)
+	cacheClient, err := cache.NewRedisOpportunityCache(addr, os.Getenv("REDIS_PASSWORD"), db, time.Duration(ttlHours)*time.Hour, "pair_best")
+	if err != nil {
+		logging.Fatalf("[snapshot-worker] redis opportunity cache: %v", err)
+	}
+	return cacheClient
+}
+
 func mustPolymarketClient() *polymarket.Client {
 	cfg := polymarket.Config{
 		BaseURL: envString("POLYMARKET_API_URL", ""),
@@ -393,6 +430,30 @@ func appendFinalLog(payload *matches.Payload) {
 	if _, err := f.Write(append(data, '\n')); err != nil {
 		logging.Errorf("[snapshot-worker] final log write error: %v", err)
 	}
+}
+
+func (d workerDeps) shouldEmitOpportunity(ctx context.Context, pairID string, best *matches.Opportunity) (bool, *cache.OpportunityRecord, error) {
+	if d.opportunityCache == nil || best == nil || pairID == "" {
+		return true, nil, nil
+	}
+	record, ok, err := d.opportunityCache.Get(ctx, pairID)
+	if err != nil {
+		return true, nil, err
+	}
+	if ok && record != nil && record.ProfitUSD >= best.ProfitUSD-profitEpsilon {
+		return false, record, nil
+	}
+	newRecord := cache.OpportunityRecord{
+		ProfitUSD: best.ProfitUSD,
+		Direction: string(best.Direction),
+		Quantity:  best.Quantity,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := d.opportunityCache.Set(ctx, pairID, newRecord); err != nil {
+		return true, record, err
+	}
+	logging.Infof("[opportunity-cache] stored pair=%s profit=%.4f direction=%s qty=%.2f", pairID, best.ProfitUSD, best.Direction, best.Quantity)
+	return true, record, nil
 }
 
 func envInt(key string, def int) int {

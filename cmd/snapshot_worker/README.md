@@ -22,6 +22,7 @@ questions, verdict) so arbitrage candidates can be vetted before execution.
 | `VALIDATOR_MAX_TOKENS` | `800` | Max tokens for the response. |
 | `VALIDATOR_SYSTEM_PROMPT` | _(built-in)_ | Optional override for the system prompt. |
 | `PDFTOTEXT_BIN` | `pdftotext` | Path to the CLI used to extract Kalshi contract text. |
+| `OPPORTUNITY_CACHE_TTL_HOURS` | `72` | TTL for the Redis cache that tracks the best profit per pair to suppress duplicate alerts. |
 
 ## Status
 
@@ -29,4 +30,6 @@ The worker now reaches the LLM stage: each profitable pair is enriched with the
 taker arb simulation and full resolution metadata (including Kalshi contract PDF
 text via `pdftotext`). The validator emits a structured JSON verdict
 (`ValidResolution`, `ResolutionReason`) which is logged for now; Redis caching
-and downstream publishing will follow in a later iteration.
+and downstream publishing will follow in a later iteration. After the fresh
+orderbook arb check, the worker also writes the best observed profit per pair to
+Redis so subsequent runs only emit if the opportunity improves.
