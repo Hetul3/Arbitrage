@@ -2,7 +2,122 @@
 
 This repository builds a **Polymarket ↔ Kalshi cross-venue arbitrage detector**. It continuously ingests markets from both venues, finds equivalent events via embeddings + LLM validation, simulates executable taker trades (fees + slippage), and surfaces profitable opportunities via CLI while writing all normalized data into SQLite for future analytics/frontends. Every component is containerized (Docker + Colima) so agents get deterministic environments; see `experiments/README.md` for Colima/Docker prerequisites.
 
-The latest end-to-end architecture, schemas, and pipeline details live in [ARCHITECTURE.md](ARCHITECTURE.md). Use that file to bootstrap any new agent/session—it contains the full problem space, component breakdown, Kafka topics, cache keys, and database layouts.
+## Architecture Storyboard
+
+```mermaid
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#ffffff',
+    'primaryTextColor': '#1e293b',
+    'primaryBorderColor': '#3b82f6',
+    'lineColor': '#64748b',
+    'secondaryColor': '#f8fafc',
+    'tertiaryColor': '#ffffff',
+    'edgeLabelBackground':'#ffffff',
+    'fontSize': '12px',
+    'fontFamily': 'ui-sans-serif, system-ui, sans-serif'
+  }
+}}%%
+
+flowchart LR
+    %% === CLASS DEFINITIONS ===
+    classDef worker fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e40af,font-weight:bold;
+    classDef queue fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d,font-weight:bold;
+    classDef infra fill:#fff7ed,stroke:#f59e0b,stroke-width:1px,color:#9a3412,font-style:italic;
+    classDef venue fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#475569;
+    classDef engine fill:#fff1f2,stroke:#e11d48,stroke-width:2px,color:#9f1239;
+
+    %% === PERSISTENT BACKBONE ===
+    REDIS[(Redis State & Distributed Locks)]:::infra
+    SQLITE[(SQLite Data Warehouse)]:::infra
+
+    %% === STAGE 1: INGESTION ===
+    subgraph ST1 [1. Ingestion Stack]
+        direction TB
+        POLY_API([Polymarket API]):::venue
+        KAL_API([Kalshi API]):::venue
+        
+        subgraph COLLECTORS [Collectors]
+            direction LR
+            P_COLL[[Polymarket Collector]]:::worker
+            K_COLL[[Kalshi Collector]]:::worker
+        end
+        
+        POLY_API --> P_COLL
+        KAL_API --> K_COLL
+    end
+
+    %% === CONNECTOR: SNAPSHOT QUEUES ===
+    subgraph ST_QUEUES [Kafka Ingestion Fabric]
+        direction TB
+        Q_POLY{{"[Queue] snapshots.polymarket"}}:::queue
+        Q_KAL{{"[Queue] snapshots.kalshi"}}:::queue
+    end
+
+    P_COLL ==> Q_POLY
+    K_COLL ==> Q_KAL
+    P_COLL & K_COLL -.->|Archive| SQLITE
+
+    %% === STAGE 2: SEMANTIC HUB ===
+    subgraph ST2 [2. Semantic Hub]
+        direction TB
+        MATCHER[[Embedding Matcher]]:::worker
+        CHROMA[(/ Chroma Vector Store /)]:::infra
+        MATCHER <==> CHROMA
+    end
+
+    Q_POLY & Q_KAL ==> MATCHER
+    MATCHER <==>|Cache Embeddings| REDIS
+
+    %% === CONNECTOR: MATCH QUEUE ===
+    Q_MATCHES{{"[Queue] matches.live"}}:::queue
+    MATCHER ==> Q_MATCHES
+
+    %% === STAGE 3: ANALYSIS ===
+    subgraph ST3 [3. Validation & Resolution]
+        direction TB
+        PRE_CHECK[[Arb Engine - Phase 1 - Pre-Check]]:::worker
+        VALIDATOR([LLM Equivalence Validator]):::infra
+        PDF_RULES[/ PDF Rule Extraction /]:::infra
+        PRE_CHECK ==> VALIDATOR
+        VALIDATOR --- PDF_RULES
+    end
+
+    Q_MATCHES ==> PRE_CHECK
+    PRE_CHECK <==>|Verdict Check| REDIS
+
+    %% === STAGE 4: MODELING ===
+    subgraph ST4 [4. Opportunity Modeling Plane]
+        direction TB
+        ARB_ENGINE[[Arb Engine - Phase 2 - Simulation]]:::engine
+        REFETCH([Real-time Re-fetch]):::venue
+        WALK[/ Orderbook Walking /]:::engine
+        ARB_ENGINE --- REFETCH
+        ARB_ENGINE --- WALK
+    end
+
+    VALIDATOR ==>|Verified Safe| ARB_ENGINE
+    ARB_ENGINE <==>|Throttle / Best Profit| REDIS
+    ARB_ENGINE -.->|Analytics Export| SQLITE
+
+    %% === CONNECTOR: OPPORTUNITY QUEUE ===
+    Q_OPPS{{"[Queue] opportunities.live"}}:::queue
+    ARB_ENGINE ==> Q_OPPS
+
+    %% === STAGE 5: DELIVERY ===
+    subgraph ST5 [5. Delivery]
+        direction TB
+        CLI([CLI Consumer]):::worker
+    end
+
+    Q_OPPS ==> CLI
+
+    %% === LAYOUT FORCING ===
+    ST1 ~~~ ST_QUEUES ~~~ ST2 ~~~ Q_MATCHES ~~~ ST3 ~~~ ST4 ~~~ Q_OPPS ~~~ ST5
+```
+
+The latest end-to-end architecture, schemas, and pipeline details live in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Repository Layout
 
