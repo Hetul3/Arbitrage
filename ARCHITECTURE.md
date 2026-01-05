@@ -20,172 +20,239 @@ Key references:
 - Kalshi Trade API docs (events, series, market orderbooks, fee schedule, rate limits).
 - Nebius OpenAI-compatible API for embeddings + LLM validation.
 
-## High-Level Pipeline
+## Pipeline Architecture & Data Lifecycle
 
+### System Topology Storyboard
+
+This interactive storyboard visualizes the system's chronological pipeline. The data flows strictly from left to right, maturing from raw market ingestion into validated, modeled opportunities.
+
+```mermaid
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#ffffff',
+    'primaryTextColor': '#1e293b',
+    'primaryBorderColor': '#3b82f6',
+    'lineColor': '#64748b',
+    'secondaryColor': '#f8fafc',
+    'tertiaryColor': '#ffffff',
+    'edgeLabelBackground':'#ffffff',
+    'fontSize': '12px',
+    'fontFamily': 'ui-sans-serif, system-ui, sans-serif'
+  }
+}}%%
+
+flowchart LR
+    %% === CLASS DEFINITIONS ===
+    classDef worker fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e40af,font-weight:bold;
+    classDef queue fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d,font-weight:bold;
+    classDef infra fill:#fff7ed,stroke:#f59e0b,stroke-width:1px,color:#9a3412,font-style:italic;
+    classDef venue fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#475569;
+    classDef engine fill:#fff1f2,stroke:#e11d48,stroke-width:2px,color:#9f1239;
+
+    %% === PERSISTENT BACKBONE ===
+    REDIS[(Redis State & Distributed Locks)]:::infra
+    SQLITE[(SQLite Data Warehouse)]:::infra
+
+    %% === STAGE 1: INGESTION ===
+    subgraph ST1 [1. Ingestion Stack]
+        direction TB
+        POLY_API([Polymarket API]):::venue
+        KAL_API([Kalshi API]):::venue
+        
+        subgraph COLLECTORS [Collectors]
+            direction LR
+            P_COLL[[Polymarket Collector]]:::worker
+            K_COLL[[Kalshi Collector]]:::worker
+        end
+        
+        POLY_API --> P_COLL
+        KAL_API --> K_COLL
+    end
+
+    %% === CONNECTOR: SNAPSHOT QUEUES ===
+    subgraph ST_QUEUES [Kafka Ingestion Fabric]
+        direction TB
+        Q_POLY{{"[Queue] snapshots.polymarket"}}:::queue
+        Q_KAL{{"[Queue] snapshots.kalshi"}}:::queue
+    end
+
+    P_COLL ==> Q_POLY
+    K_COLL ==> Q_KAL
+    P_COLL & K_COLL -.->|Archive| SQLITE
+
+    %% === STAGE 2: SEMANTIC HUB ===
+    subgraph ST2 [2. Semantic Hub]
+        direction TB
+        MATCHER[[Embedding Matcher]]:::worker
+        CHROMA[(/ Chroma Vector Store /)]:::infra
+        MATCHER <==> CHROMA
+    end
+
+    Q_POLY & Q_KAL ==> MATCHER
+    MATCHER <==>|Cache Embeddings| REDIS
+
+    %% === CONNECTOR: MATCH QUEUE ===
+    Q_MATCHES{{"[Queue] matches.live"}}:::queue
+    MATCHER ==> Q_MATCHES
+
+    %% === STAGE 3: ANALYSIS ===
+    subgraph ST3 [3. Validation & Resolution]
+        direction TB
+        PRE_CHECK[[Arb Engine - Phase 1 - Pre-Check]]:::worker
+        VALIDATOR([LLM Equivalence Validator]):::infra
+        PDF_RULES[/ PDF Rule Extraction /]:::infra
+        PRE_CHECK ==> VALIDATOR
+        VALIDATOR --- PDF_RULES
+    end
+
+    Q_MATCHES ==> PRE_CHECK
+    PRE_CHECK <==>|Verdict Check| REDIS
+
+    %% === STAGE 4: MODELING ===
+    subgraph ST4 [4. Opportunity Modeling Plane]
+        direction TB
+        ARB_ENGINE[[Arb Engine - Phase 2 - Simulation]]:::engine
+        REFETCH([Real-time Re-fetch]):::venue
+        WALK[/ Orderbook Walking /]:::engine
+        ARB_ENGINE --- REFETCH
+        ARB_ENGINE --- WALK
+    end
+
+    VALIDATOR ==>|Verified Safe| ARB_ENGINE
+    ARB_ENGINE <==>|Throttle / Best Profit| REDIS
+    ARB_ENGINE -.->|Analytics Export| SQLITE
+
+    %% === CONNECTOR: OPPORTUNITY QUEUE ===
+    Q_OPPS{{"[Queue] opportunities.live"}}:::queue
+    ARB_ENGINE ==> Q_OPPS
+
+    %% === STAGE 4: DELIVERY ===
+    subgraph ST5 [5. Delivery]
+        direction TB
+        CLI([CLI Consumer]):::worker
+    end
+
+    Q_OPPS ==> CLI
+
+    %% === LAYOUT FORCING ===
+    ST1 ~~~ ST_QUEUES ~~~ ST2 ~~~ Q_MATCHES ~~~ ST3 ~~~ ST4 ~~~ Q_OPPS ~~~ ST5
 ```
-Collectors -> Kafka (snapshots) -> Snapshot Worker
-        Snapshot Worker -> Redis (embeddings) -> Chroma upsert -> Chroma match
-        Snapshot Worker -> Arb precheck -> LLM (if needed) -> final orderbooks -> arb calc -> opportunities topic/CLI
+
+### Lifecycle Sequence Flow
+
+The following sequence diagram tracks a single market state transition from ingestion through to opportunity publication.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant V as External Venue (Poly/Kalshi)
+    participant C as Collector
+    participant K as Kafka Bus
+    participant W as Matcher Worker
+    participant R as Redis Cache
+    participant CR as Chroma Vector DB
+    participant S as Snapshot Worker (Arb Engine)
+    participant L as LLM Validator
+    participant CLI as CLI Consumer
+
+    V->>C: Pull Raw Market Data & Orderbook
+    C->>C: Normalize to Unified Schema
+    C->>K: Publish MarketSnapshot
+    K->>W: Consume Snapshot
+    W->>R: Fetch Cached Embedding (emb:*)
+    alt Cache Miss
+        W->>W: Call Embedding Provider
+        W->>R: Store Embedding
+    end
+    W->>CR: Upsert Vector & Metadata
+    W->>CR: Query Top Similarity Candidates
+    W->>K: Publish MatchPayload (matches.live)
+    K->>S: Consume Match
+    S->>S: Arb Phase 1: Taker Pre-Check
+    S->>R: Check Verdict Cache (pair_verdict:*)
+    alt Cache Miss
+        S->>L: Request LLM Equivalence Check
+        L->>S: Return SAFE/UNSAFE verdict
+        S->>R: Cache Verdict
+    end
+    S->>V: Refresh Live Orderbooks
+    S->>S: Arb Phase 2: Depth-Aware Simulation
+    S->>K: Publish Opportunity (opportunities.live)
+    K->>CLI: Display Profit/ROI Summary
 ```
 
-1. **Collectors**: Separate Go processes for Polymarket and Kalshi.
-   - Paginate each venue's event lists/search endpoints, fetch per-market detail, normalize everything, store in SQLite (warehouse only), then publish to Kafka (`snapshots.polymarket`, `snapshots.kalshi`).
-   - Normalized snapshot includes IDs, text fields, resolution info, close time, tick size, token/orderbook IDs, best bid/ask, and any batch orderbook summary collected inline.
-
-2. **Kafka Workers (current implementation)**
-   - Venue-specific workers consume the snapshot topics, build an embedding string (`event_title`, `question`, settle date, trimmed description + subtitle), call Nebius, and upsert vectors + metadata (venue, IDs, `captured_at`, `captured_at_unix`, `close_time`, `text_hash`, `resolution_hash`) into Chroma. Embeddings are cached in Redis (`emb:<venue>:<market_id>:<text_hash>`) so replays skip redundant calls.
-   - Each Chroma entry uses the deterministic ID `venue:market_id` (so new snapshots overwrite the same vector) and stores the full `MarketSnapshot` JSON in the `document` field for later re-use.
-
-3. **Snapshot Worker**
-   - Current implementation consumes `matches.live`, runs the taker-only arb pre-check with the captured orderbooks, and **only** forwards profitable + tradable pairs into the Nebius LLM validator (GPT-OSS 120B, temperature 0). The validator receives a structured JSON blob (both venues’ questions, rules text, settlement sources, cutoff times, Kalshi contract PDF excerpt) and returns `{ValidResolution, ResolutionReason}`; the worker logs the verdict for each pair. After a SAFE verdict, the worker refetches live orderbooks, attaches them under a new `fresh` section on the payload, and runs a final arb evaluation against those snapshots. The freshly computed opportunity compares its profit against a Redis cache (`pair_best:<pair_id>`) so we only emit when the result beats the previous best. Cached SAFE pairs (once Redis is wired in) will skip the first arb+LLM stage, reuse the cached verdict, populate `fresh`, and go directly into the final arb engine.
-   - Next iterations will ensure an embedding exists via Redis cache (`emb:<platform>:<market_id>:<text_hash>`). Misses call Nebius embeddings, store result in Redis (multi-day TTL), and immediately upsert to Chroma. Verdicts are also cached (`pair_verdict:<sorted venue:id:text_hash|...>`) so SAFE pairs can skip the LLM when neither side’s resolution text has changed.
-   - Will query Chroma for opposite-venue markets: topK=3 within last-hour freshness, cosine similarity ≥ threshold (currently 0.95), and optional category match.
-   - For each candidate result:
-     - Construct a `pair_id` (e.g., `sha256("poly:<id>|kalshi:<id>")`).
-     - Look in Redis `pair_bundle:<poly_id>:<kalshi_id>:<poly_hash>:<kalshi_hash>` to see if a SAFE verdict + opportunity metrics already exist. A cache hit means text/resolution data are unchanged.
-     - Acquire `pair_inflight:<pair_id>` (short TTL ~60s) to avoid duplicate concurrent work.
-     - Two paths:
-       1. **Cached SAFE pair**: Skip the first arb pre-check and LLM. Go directly to fresh orderbook fetch + final arb engine.
-       2. **New/changed pair**: Run quick arb pre-check using snapshot prices (YES-on-one + NO-on-other, taker assumption). If both directions fail `p_yes + p_no + fees >= 1`, stop. Otherwise gather resolution info and call Nebius LLM to judge equivalence. Store verdict + summary metrics in SQLite (analytics) and Redis bundle cache.
-
-3. **Final Arb Stage** (runs inside the same worker regardless of path):
-   - Fetch the freshest orderbooks via APIs (Polymarket `/books` batched; Kalshi `/orderbook`). Always hit APIs, no reuse cache.
-   - Walk orderbooks to compute taker fills for configured budgets (e.g., $100). Include Kalshi fee rounding formula, Polymarket fee=0 (unless API changes). Output profit/ROI, contracts hedged, total fees.
-   - Update Redis pair bundle with latest verdict + best opportunity metrics, even if profit ≤ 0 (records history for future comparisons).
-   - Emit to Kafka `opportunities.live` and append to SQLite `opportunities` table **only if** profit > 0 and either no prior cached opportunity exists or the new profit/edge materially improves the cached one.
-
-4. **CLI / Future API**: Small Go service consuming `opportunities.live`, caches current best per pair (Redis + in-memory), and prints structured summaries in real time. Future frontends can read from the same data.
-
-## Components
+## Component Responsibilities
 
 | Component | Responsibility |
 | --- | --- |
-| `polymarket_collector` | Paginate Gamma events, fetch details & relevant CLOB snapshots, normalize, store in SQLite, publish to Kafka. |
-| `kalshi_collector` | Paginate events/markets, fetch per-market detail + orderbook snippets, normalize, store, publish. |
-| `polymarket_worker` / `_dev` | Consumes `polymarket.snapshots`, embeds each market via Nebius, and upserts vectors + metadata into Chroma (prod logs summaries, dev can dump payloads). |
-| `kalshi_worker` / `_dev` | Same as above for the Kalshi topic. |
-| `snapshot_worker` | Consumes matches, runs the taker-only arb pre-check, and forwards only profitable + tradable pairs to the Nebius LLM validator (includes Kalshi contract PDF extraction + structured verdict logging). |
-| `chroma_maintainer` | Periodically deletes entries older than 1 hour to keep vector store fresh. |
-| `cli_consumer` | Displays live opportunities; later replaced/augmented by HTTP API. |
+| `polymarket_collector` | Paginate Gamma events, fetch details, normalize, and publish to Kafka snapshots. |
+| `kalshi_collector` | Paginate markets, fetch snippets + orderbooks, normalize, and publish to Kafka. |
+| `polymarket_worker` | Vectorize Polymarket snapshots via Nebius and upsert to Chroma. |
+| `kalshi_worker` | Vectorize Kalshi snapshots via Nebius and upsert to Chroma. |
+| `snapshot_worker` | Consumes matches; orchestrates Pre-Checks, Equivalence Validation, and Simulations. |
+| `chroma_maintainer` | Lifecycle management: purge stale embeddings (>1 hour) from vector store. |
+| `cli_consumer` | Real-time CLI dashboard displaying profitable modeled opportunities. |
 
 All components run in Go using Docker Compose for local orchestration. Supporting services: Kafka, Redis, SQLite (file-based), ChromaDB, Nebius API access.
 
-## Kafka Topics
+## Message Bus Topology (Kafka)
 
-1. `snapshots.polymarket` – key `polymarket:<market_id>`
-2. `snapshots.kalshi` – key `kalshi:<market_ticker>`
-3. `pairs.candidates` – key `pair:<poly_id>:<kalshi_id>`
-4. `opportunities.live` – key `pair:<poly_id>:<kalshi_id>`
+The system utilizes Kafka as a strictly ordered snapshot stream and candidate bus.
 
-No third stage—matching + validation + final arb happen within the snapshot worker.
-
-### `MarketSnapshot` payload (JSON)
-
-```json
-{
-  "platform": "polymarket",
-  "market_id": "string",
-  "event_id": "string|null",
-  "category": "politics",
-  "title": "Will Candidate X win?",
-  "description": "...",
-  "resolution_source": "AP",
-  "resolution_description": "...",
-  "end_time": 1730000000,
-  "tick_size": 0.01,
-  "clob_tokens": {"yes": "tokenA", "no": "tokenB"},
-  "prices": {"yes_bid": 0.48, "yes_ask": 0.50, "no_bid": 0.50, "no_ask": 0.52},
-  "orderbook_snapshot": {
-    "yes": [[0.50, 100], [0.51, 50]],
-    "no": [[0.50, 120], [0.49, 40]]
-  },
-  "text_hash": "sha256(title+description)",
-  "resolution_hash": "sha256(resolution_source+resolution_description+end_time)",
-  "captured_at": 1730000005
-}
-```
-
-Fields mirror Kalshi payloads (tick_size, settlement sources, etc.).
-
-### `PairCandidate` payload
-
-```json
-{
-  "pair_id": "sha256('poly:<id>|kalshi:<id>')",
-  "polymarket": {
-    "market_id": "...",
-    "text_hash": "...",
-    "resolution_hash": "...",
-    "prices": {"yes_ask": 0.48, "no_ask": 0.52},
-    "orderbook": {"yes": [...], "no": [...]},
-    "tick_size": 0.01
-  },
-  "kalshi": {
-    "market_ticker": "...",
-    "text_hash": "...",
-    "resolution_hash": "...",
-    "prices": {"yes_ask": 0.49, "no_ask": 0.51},
-    "orderbook": {"yes": [...], "no": [...]},
-    "tick_size": 0.01
-  },
-  "cached_bundle": false,
-  "matched_at": 1730000300
-}
-```
-
-`cached_bundle=true` indicates the Redis cache already contains a SAFE verdict + previous opportunity metrics and the hashes still match.
-
-### `Match` payload
-
-Matcher results are appended to `matches.log` for debugging and published to Kafka (`matches.live`). Each payload contains the full source/target snapshots so downstream stages do not need to hit Chroma again.
-
-```json
-{
-  "version": 1,
-  "pair_id": "...",
-  "similarity": 0.97,
-  "distance": 0.03,
-  "matched_at": 1730000300,
-  "source": { "... MarketSnapshot ..." },
-  "target": { "... MarketSnapshot ..." },
-  "arbitrage": null
-}
-```
-
-The arb engine consumes this topic, simulates both legs with slippage + fees, and writes the best `arbitrage` object back on the payload (and logs the concise summary).
-
-### `Opportunity` payload
-
-```json
-{
-  "pair_id": "...",
-  "direction": "BUY_YES_POLY_BUY_NO_KALSHI",
-  "profit_usd": 2.15,
-  "edge_bps": 130,
-  "max_size_contracts": 180,
-  "budget_usd": 100,
-  "kalshi_fee_taker": 1.75,
-  "freshness_seconds": 2,
-  "books": {
-    "polymarket": {...},
-    "kalshi": {...}
-  },
-  "cached_bundle": true,
-  "captured_at": 1730000320
-}
-```
-
-## Redis Keys
-
-| Key | Purpose | TTL |
+| Topic | Partition Key | Payload Type |
 | --- | --- | --- |
-| `emb:<platform>:<market_id>:<text_hash>` | Cached Nebius embedding for title+description. | ≥10 days (RDB snapshot). |
-| `pair_verdict:<venue:id:text_hash>|<venue:id:text_hash>` | Cached SAFE/UNSAFE LLM verdict for a pair. | ≥10 days |
-| `pair_bundle:<poly_id>:<kalshi_id>:<poly_hash>:<kalshi_hash>` | Stores `{verdict, last_profit_usd, edge_bps, max_size, updated_at}` for combined match/LLM result. | Long TTL (days) with LRU eviction acceptable. |
-| `pair_inflight:<pair_id>` | Short lock to prevent duplicate processing. | ~60 seconds. |
-| `pair_best:<pair_id>` | Highest observed profit for that pair’s final-stage opportunity. | Configurable (default 72h). |
+| `snapshots.polymarket` | `market_id` | Normalized MarketSnapshot |
+| `snapshots.kalshi` | `market_ticker` | Normalized MarketSnapshot |
+| `matches.live` | `pair_id` | Similarity Candidate + Snapshots |
+| `opportunities.live` | `pair_id` | Modeled Arb Opportunity |
 
-A cache hit on `pair_bundle` that matches the latest hashes allows us to skip the initial arb pre-check + LLM.
+## Persistent State (Redis)
+
+The following table maps the key-space hierarchy used for low-latency caching and distributed locking across the processing pipeline.
+
+| Key Pattern | Purpose | Lifetime (TTL) |
+| :--- | :--- | :--- |
+| `emb:<venue>:<market_id>:<hash>` | Vector embeddings for market text | 10 Days |
+| `pair_verdict:<sorted_hashes>` | Binary LLM equivalence verdicts (SAFE/UNSAFE) | 10 Days |
+| `pair_bundle:<ids>:<hashes>` | Cached modeling summaries for valid pairs | Persistent |
+| `pair_inflight:<pair_id>` | Distributed lock to prevent duplicate analysis | 60 Seconds |
+| `pair_best:<pair_id>` | Suppression lock for previously reported profit peaks | 72 Hours |
+
+## Data Models & Schema (Warehouse)
+
+The system utilizes a relational data model for historical analytics and vector-based lookups for real-time matching.
+
+```mermaid
+erDiagram
+    MARKETS ||--o{ MATCHES : "matched_as_source"
+    MARKETS ||--o{ MATCHES : "matched_as_target"
+    MATCHES ||--o{ OPPORTUNITIES : "evaluated_to"
+    MARKETS {
+        string venue PK
+        string market_id PK
+        string event_id
+        string question
+        json orderbook_json
+        string text_hash
+        datetime captured_at
+    }
+    MATCHES {
+        string pair_id PK
+        float similarity
+        datetime matched_at
+        json source_metadata "Market Snapshot"
+        json target_metadata "Market Snapshot"
+    }
+    OPPORTUNITIES {
+        string pair_id FK
+        string direction
+        float profit_usd
+        float edge_bps
+        float budget_usd
+        datetime captured_at
+    }
+```
 
 ## SQLite Tables (analytics only)
 
@@ -198,6 +265,32 @@ Used as a warehouse; runtime logic never depends on these tables.
   - Orderbook depth + metadata (per market snapshot): `yes_bids_json`, `yes_asks_json`, `no_bids_json`, `no_asks_json`, `book_captured_at`, `book_hash`. These capture the ladder as arrays of `[price, quantity, rawPrice, rawAmount]` ready for downstream slippage simulations.
   - Hashes, bookkeeping, and debugging: `text_hash`, `resolution_hash`, `last_seen_at`, `raw_json`.
 - (coming later) `pairs`, `pair_decisions`, and `opportunities` tables for downstream stages once implemented.
+
+## LLM Matching & Decision Logic
+
+The following state diagram illustrates the decision gatekeepers that a matched pair must pass before being published as an opportunity.
+
+```mermaid
+stateDiagram-v2
+    [*] --> MatchDiscovery
+    MatchDiscovery --> TakerPreCheck : Similarity > 0.95
+    TakerPreCheck --> VerdictCache : Profitable Snapshot
+    TakerPreCheck --> [*] : No Arb
+    
+    state VerdictCache <<choice>>
+    VerdictCache --> FinalSimulation : Cached SAFE
+    VerdictCache --> LLMValidation : Cache MISS
+    VerdictCache --> [*] : Cached UNSAFE
+    
+    LLMValidation --> FinalSimulation : LLM Says SAFE
+    LLMValidation --> [*] : LLM Says UNSAFE
+    
+    FinalSimulation --> RedisBestLock : ROI > Threshold
+    RedisBestLock --> PublishOpportunity : Beats Previous Best
+    RedisBestLock --> [*] : Stale/Inferior
+    
+    PublishOpportunity --> [*]
+```
 
 ## LLM + Matching Details
 
